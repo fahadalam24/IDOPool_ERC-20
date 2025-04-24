@@ -1,103 +1,197 @@
 package core
 
 import (
-	"bytes"
+	//"bytes"
 	"crypto/sha256"
-	"encoding/gob" // Using Gob for block hashing - more efficient than JSON for binary data
-	"log"
-	"time"
+	// "encoding/gob" // No longer needed for hashing
 	"errors"
 	"fmt"
+	"log"
+	"time"
+
+	"go-blockchain/pb" // Import the generated package
+
+	"google.golang.org/protobuf/proto" // Import the protobuf library
 )
 
 // BlockHeader defines the header structure of a block.
+// Keep core struct definition as is.
 type BlockHeader struct {
-	Version       uint32    `json:"version"`       // Block version number
-	PrevBlockHash []byte    `json:"prevBlockHash"` // Hash of the previous block
-	MerkleRoot    []byte    `json:"merkleRoot"`    // Root hash of the transaction Merkle tree
-	Timestamp     int64     `json:"timestamp"`     // Unix timestamp
-	Height        uint32    `json:"height"`        // Block height (index in the chain)
-	Nonce         uint64    `json:"nonce"`         // Nonce used for Proof-of-Work (or other consensus)
-	// TODO: Add difficulty target later
+	Version       uint32    `json:"version"`
+	PrevBlockHash []byte    `json:"prevBlockHash"`
+	MerkleRoot    []byte    `json:"merkleRoot"`
+	Timestamp     int64     `json:"timestamp"`
+	Height        uint32    `json:"height"`
+	Nonce         uint64    `json:"nonce"`
 }
 
 // Block represents a single block in the blockchain.
+// Keep core struct definition as is.
 type Block struct {
-	Header       *BlockHeader    `json:"header"`       // Pointer to the block header
-	Transactions []*Transaction `json:"transactions"` // List of transactions included in the block
+	Header       *BlockHeader    `json:"header"`
+	Transactions []*Transaction `json:"transactions"`
 	hash         []byte          // Cached hash of the block (specifically the header)
 }
 
-// CalculateMerkleRoot calculates a simple Merkle root for the block's transactions.
-func CalculateMerkleRoot(transactions []*Transaction) ([]byte, error) {
-	// --- Case: Zero Transactions ---
-	if len(transactions) == 0 {
-		// Use the predefined empty hash constant from merkle.go
-		// Need to access it if defined there, or redefine here.
-		// For simplicity, let's assume it's accessible or just recalculate here for now.
-		// emptyHash := sha256.Sum256([]byte{}) // Option 1: Recalculate
-		// return emptyHash[:], nil
-		// Option 2: Assume accessible via core.emptyMerkleRootHash (requires export or different structure)
-		// Let's stick to recalculating here for simplicity unless we restructure package access.
-		emptyHash := sha256.Sum256([]byte{}) // Using recalculation for now
-		return emptyHash[:], nil
-		// To use the constant directly, you'd need:
-		// 1. Make emptyMerkleRootHash exported (e.g., EmptyMerkleRootHash) in merkle.go
-		// 2. Access it as core.EmptyMerkleRootHash[:] here.
+// --- Mapping functions (New addition) ---
+
+// ToProto converts a core.BlockHeader to its Protobuf representation.
+func (h *BlockHeader) ToProto() *pb.BlockHeader {
+	return &pb.BlockHeader{
+		Version:       h.Version,
+		PrevBlockHash: h.PrevBlockHash,
+		MerkleRoot:    h.MerkleRoot,
+		Timestamp:     h.Timestamp,
+		Height:        h.Height,
+		Nonce:         h.Nonce,
+	}
+}
+
+// HeaderFromProto converts a pb.BlockHeader back to a core.BlockHeader.
+func HeaderFromProto(pbHeader *pb.BlockHeader) *BlockHeader {
+	if pbHeader == nil {
+		return nil
+	}
+	return &BlockHeader{
+		Version:       pbHeader.Version,
+		PrevBlockHash: pbHeader.PrevBlockHash,
+		MerkleRoot:    pbHeader.MerkleRoot,
+		Timestamp:     pbHeader.Timestamp,
+		Height:        pbHeader.Height,
+		Nonce:         pbHeader.Nonce,
+	}
+}
+
+// ToProto converts a core.Transaction to its Protobuf representation.
+func (t *Transaction) ToProto() (*pb.Transaction, error) {
+	// Ensure hash is calculated before including it in the proto message
+	// Note: We included 'hash' field in proto.Transaction
+	// If hash depends on other fields, calculate it first.
+	hash, err := t.Hash() // Calculate/get hash
+	if err != nil {
+		return nil, fmt.Errorf("failed to get tx hash for proto conversion: %w", err)
 	}
 
-	// --- Step 1: Extract Transaction Hashes ---
-	txHashes := make([][]byte, 0, len(transactions)) // Pre-allocate slice capacity
+	return &pb.Transaction{
+		Data: t.Data,
+		Hash: hash, // Include the calculated hash
+		// Map other fields here if added later
+	}, nil
+}
+
+// TransactionFromProto converts a pb.Transaction back to a core.Transaction.
+func TransactionFromProto(pbTx *pb.Transaction) *Transaction {
+	if pbTx == nil {
+		return nil
+	}
+	tx := &Transaction{
+		Data: pbTx.Data,
+		hash: pbTx.Hash, // Store the hash from the proto message
+		// Map other fields here if added later
+	}
+	return tx
+}
+
+// ToProto converts a core.Block to its Protobuf representation.
+func (b *Block) ToProto() (*pb.Block, error) {
+	pbHeader := b.Header.ToProto() // Convert header
+	pbTransactions := make([]*pb.Transaction, len(b.Transactions))
+	var err error
+	for i, tx := range b.Transactions {
+		pbTransactions[i], err = tx.ToProto() // Convert each transaction
+		if err != nil {
+			return nil, fmt.Errorf("failed to convert transaction %d to proto: %w", i, err)
+		}
+	}
+
+	return &pb.Block{
+		Header:       pbHeader,
+		Transactions: pbTransactions,
+	}, nil
+}
+
+// BlockFromProto converts a pb.Block back to a core.Block.
+func BlockFromProto(pbBlock *pb.Block) *Block {
+	if pbBlock == nil {
+		return nil
+	}
+	header := HeaderFromProto(pbBlock.Header) // Convert header back
+	transactions := make([]*Transaction, len(pbBlock.Transactions))
+	for i, pbTx := range pbBlock.Transactions {
+		transactions[i] = TransactionFromProto(pbTx) // Convert transactions back
+	}
+
+	// Note: The block hash is not part of the proto, it needs recalculation
+	// or separate handling upon receiving a block.
+	block := &Block{
+		Header:       header,
+		Transactions: transactions,
+		// hash is initially nil, will be calculated by Hash()
+	}
+	return block
+}
+
+
+// CalculateMerkleRoot remains largely the same, but relies on the updated tx.Hash()
+func CalculateMerkleRoot(transactions []*Transaction) ([]byte, error) {
+	// Handle zero transactions (no change needed here)
+	if len(transactions) == 0 {
+		emptyHash := sha256.Sum256([]byte{})
+		return emptyHash[:], nil
+	}
+
+	txHashes := make([][]byte, 0, len(transactions))
 	for i, tx := range transactions {
-		txHash, err := tx.Hash() // Assumes tx.Hash() returns the SHA256 hash []byte
+		// Use the updated tx.Hash() which now uses Protobuf
+		txHash, err := tx.Hash()
 		if err != nil {
 			log.Printf("Error hashing transaction #%d for Merkle tree: %v", i, err)
-			// Return error immediately to prevent block creation with potentially invalid/missing tx data.
-			// Consider how critical a single tx hash failure is - should it halt block creation? Usually yes.
 			return nil, fmt.Errorf("failed to hash transaction index %d: %w", i, err)
 		}
 		if len(txHash) == 0 {
-			// Additional check: Ensure the hash function didn't return an empty slice unexpectedly
 			return nil, fmt.Errorf("transaction index %d returned an empty hash", i)
 		}
 		txHashes = append(txHashes, txHash)
 	}
 
-	// Defensive check (though unlikely if tx loop returns error on failure)
-	if len(txHashes) == 0 /* && len(transactions) > 0 */ {
-		// This implies all transactions failed to hash, and the errors were somehow missed.
-		return nil, errors.New("no transaction hashes were generated despite non-empty transaction list")
+	if len(txHashes) == 0 {
+		return nil, errors.New("no transaction hashes were generated")
 	}
 
-	// --- Step 2: Build the Merkle Tree ---
-	// NewMerkleTree itself handles the cases of 1, even, or odd number of hashes.
-	merkleTree, err := NewMerkleTree(txHashes)
+	merkleTree, err := NewMerkleTree(txHashes) // Assumes NewMerkleTree exists in merkle.go
 	if err != nil {
 		log.Printf("Error building Merkle tree: %v", err)
 		return nil, fmt.Errorf("failed to build merkle tree: %w", err)
 	}
 
-	// --- Step 3: Return the Root Hash ---
 	if merkleTree == nil || merkleTree.RootNode == nil || len(merkleTree.RootNode.Data) == 0 {
-		// Final sanity check on the result from NewMerkleTree
 		return nil, errors.New("merkle tree construction resulted in a nil or invalid root node")
 	}
 	return merkleTree.RootNode.Data, nil
 }
 
-// CalculateHash calculates the hash of the block header using Gob encoding.
+
+// CalculateHash calculates the hash of the block header using Protobuf encoding.
 func (b *Block) CalculateHash() ([]byte, error) {
-	var buf bytes.Buffer
-	encoder := gob.NewEncoder(&buf)
-	err := encoder.Encode(b.Header) // Only encode the header for the block hash
-	if err != nil {
-		return nil, err
+	if b.Header == nil {
+		return nil, errors.New("cannot calculate hash of block with nil header")
 	}
-	hash := sha256.Sum256(buf.Bytes())
+	// Convert the core header to its proto representation
+	headerProto := b.Header.ToProto()
+
+	// Marshal the proto header
+	headerBytes, err := proto.Marshal(headerProto)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal block header to proto: %w", err)
+	}
+
+	// Calculate SHA256 hash
+	hash := sha256.Sum256(headerBytes)
 	return hash[:], nil
 }
 
 // Hash returns the cached hash of the block, calculating it if necessary.
+// Uses the updated CalculateHash method.
 func (b *Block) Hash() ([]byte, error) {
 	if b.hash != nil {
 		return b.hash, nil
@@ -110,22 +204,23 @@ func (b *Block) Hash() ([]byte, error) {
 	return hash, nil
 }
 
-// NewBlock creates a new block. (Ensure CalculateMerkleRoot error is handled)
+
+// NewBlock creates a new block. (Uses updated CalculateMerkleRoot implicitly via tx.Hash)
 func NewBlock(transactions []*Transaction, height uint32, prevBlockHash []byte) (*Block, error) {
+	// CalculateMerkleRoot will use the new proto-based tx.Hash()
 	merkleRoot, err := CalculateMerkleRoot(transactions)
 	if err != nil {
-		// Propagate the error from CalculateMerkleRoot
 		log.Printf("Failed to calculate merkle root: %v", err)
-		return nil, fmt.Errorf("merkle root calculation failed: %w", err) // Return the error
+		return nil, fmt.Errorf("merkle root calculation failed: %w", err)
 	}
 
 	header := &BlockHeader{
 		Version:       1,
 		PrevBlockHash: prevBlockHash,
-		MerkleRoot:    merkleRoot, // Use the calculated root
+		MerkleRoot:    merkleRoot,
 		Timestamp:     time.Now().Unix(),
 		Height:        height,
-		Nonce:         0,
+		Nonce:         0, // Set during mining/consensus
 	}
 
 	block := &Block{
@@ -133,21 +228,27 @@ func NewBlock(transactions []*Transaction, height uint32, prevBlockHash []byte) 
 		Transactions: transactions,
 	}
 
-	// Calculate and cache the hash upon creation
-	_, err = block.Hash() // Hash() itself calls CalculateHash() which uses the header
+	// Calculate and cache the hash upon creation using the new CalculateHash
+	_, err = block.Hash()
 	if err != nil {
-		return nil, fmt.Errorf("block hashing failed: %w", err) // Return error if hashing fails
+		return nil, fmt.Errorf("block hashing failed during creation: %w", err)
 	}
 
 	return block, nil
 }
 
+
 // NewGenesisBlock creates the first block in the chain (the Genesis block).
 func NewGenesisBlock(genesisTx *Transaction) (*Block, error) {
 	transactions := []*Transaction{}
-    if genesisTx != nil {
-        transactions = append(transactions, genesisTx)
-    }
+	if genesisTx != nil {
+		// Ensure the genesis transaction hash is calculated
+		_, err := genesisTx.Hash()
+		if err != nil {
+			return nil, fmt.Errorf("failed to hash genesis transaction: %w", err)
+		}
+		transactions = append(transactions, genesisTx)
+	}
 	// Genesis block has height 0 and no previous block hash
 	return NewBlock(transactions, 0, []byte{})
 }
