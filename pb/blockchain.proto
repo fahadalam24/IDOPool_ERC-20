@@ -1,0 +1,51 @@
+syntax = "proto3";
+
+// Specifies the Go package path where the generated code will reside.
+// Adjust this if your module path is different or you prefer another location.
+// Using "./pb" means the generated Go package will be 'pb'.
+option go_package = "go-blockchain/pb";
+
+package pb; // Optional Protobuf package specifier
+
+// Represents a basic transaction (mirrors core.Transaction initially)
+message Transaction {
+  bytes data = 1;
+  // Future fields:
+  // bytes sender_pub_key = 2;
+  // bytes recipient_addr = 3;
+  // uint64 amount = 4;
+  // uint64 nonce = 5;
+  // bytes signature = 6;
+  bytes hash = 7; // Store the transaction hash (calculated separately)
+}
+
+// Represents a block header (mirrors core.BlockHeader)
+message BlockHeader {
+  uint32 version = 1;
+  bytes prev_block_hash = 2;
+  bytes merkle_root = 3;
+  int64 timestamp = 4;
+  uint32 height = 5;
+  uint64 nonce = 6;
+  // bytes difficulty_target = 7; // Add later if needed
+}
+
+// Represents a block (mirrors core.Block)
+message Block {
+  BlockHeader header = 1;
+  repeated Transaction transactions = 2;
+  // Note: The block hash itself isn't stored *in* the block proto,
+  // as it's derived from the header.
+}
+
+// A wrapper message to send different types of payloads over the network
+message Message {
+    oneof payload {
+        Block block = 1;
+        Transaction transaction = 2;
+        // Add other message types later, e.g.:
+        // GetBlocksRequest get_blocks_request = 3;
+        // GetBlocksResponse get_blocks_response = 4;
+        // StatusMessage status = 5;
+    }
+}
