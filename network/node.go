@@ -23,15 +23,16 @@ const (
 	ProtocolID = "/go-blockchain/1.0.0"
 )
 
-// NetworkNode represents a node in the P2P network.
-type NetworkNode struct {
-	host host.Host // The libp2p host instance
+// Node represents a network node in the blockchain network.
+type Node struct {
+	host       host.Host // The libp2p host instance
+	Reputation int       // Reputation score for the node
 	// TODO: Add channels for communication with core blockchain logic
 	// TODO: Add peerstore management
 }
 
 // NewNetworkNode creates and initializes a new network node.
-func NewNetworkNode(ctx context.Context, listenPort int) (*NetworkNode, error) {
+func NewNetworkNode(ctx context.Context, listenPort int) (*Node, error) {
 	// Create a new libp2p host.
 	// Listen on all available interfaces on the specified TCP port.
 	// 0 means automatically select a port.
@@ -49,7 +50,7 @@ func NewNetworkNode(ctx context.Context, listenPort int) (*NetworkNode, error) {
 		return nil, fmt.Errorf("failed to create libp2p host: %w", err)
 	}
 
-	node := &NetworkNode{
+	node := &Node{
 		host: h,
 	}
 
@@ -64,7 +65,7 @@ func NewNetworkNode(ctx context.Context, listenPort int) (*NetworkNode, error) {
 
 // StartDiscovery initializes peer discovery mechanisms.
 // For now, we'll use mDNS for local discovery.
-func (n *NetworkNode) StartDiscovery(ctx context.Context, serviceTag string) error {
+func (n *Node) StartDiscovery(ctx context.Context, serviceTag string) error {
 	// setup mDNS discovery
 	s := mdns.NewMdnsService(n.host, serviceTag, n) // Pass 'n' to implement the discovery interface
 
@@ -74,7 +75,7 @@ func (n *NetworkNode) StartDiscovery(ctx context.Context, serviceTag string) err
 
 // HandlePeerFound is called by the mDNS service when a new peer is found.
 // This method satisfies the mdns.Notifee interface.
-func (n *NetworkNode) HandlePeerFound(pi peer.AddrInfo) {
+func (n *Node) HandlePeerFound(pi peer.AddrInfo) {
 	// Avoid connecting to self
 	if pi.ID == n.host.ID() {
 		return
@@ -99,7 +100,7 @@ func (n *NetworkNode) HandlePeerFound(pi peer.AddrInfo) {
 	}
 }
 
-func (n *NetworkNode) GetFullAddr() (string, error) {
+func (n *Node) GetFullAddr() (string, error) {
 	var suitableAddr string
 	var firstAddr string // Keep track of the first address encountered as fallback
 
@@ -135,7 +136,7 @@ func (n *NetworkNode) GetFullAddr() (string, error) {
 }
 
 // ConnectToBootstrapPeers attempts to connect to a list of known bootstrap peers.
-func (n *NetworkNode) ConnectToBootstrapPeers(ctx context.Context, peerAddrs []string) {
+func (n *Node) ConnectToBootstrapPeers(ctx context.Context, peerAddrs []string) {
 	if len(peerAddrs) == 0 {
 		log.Println("No bootstrap peers configured.")
 		return
@@ -182,14 +183,14 @@ func (n *NetworkNode) ConnectToBootstrapPeers(ctx context.Context, peerAddrs []s
 }
 
 // Close shuts down the network node.
-func (n *NetworkNode) Close() error {
+func (n *Node) Close() error {
 	log.Println("Shutting down network node...")
 	// TODO: Close discovery services if needed
 	return n.host.Close()
 }
 
 // HandleStream processes incoming streams and decodes Protobuf messages.
-func (n *NetworkNode) HandleStream(s network.Stream) {
+func (n *Node) HandleStream(s network.Stream) {
 	defer s.Close()
 
 	buf := new(bytes.Buffer)
@@ -220,7 +221,7 @@ func (n *NetworkNode) HandleStream(s network.Stream) {
 }
 
 // SendMessage sends a Protobuf message to a specific peer.
-func (n *NetworkNode) SendMessage(ctx context.Context, peerID peer.ID, msg *pb.Message) error {
+func (n *Node) SendMessage(ctx context.Context, peerID peer.ID, msg *pb.Message) error {
 	stream, err := n.host.NewStream(ctx, peerID, protocol.ID(ProtocolID))
 	if err != nil {
 		return fmt.Errorf("failed to create stream: %w", err)
@@ -240,12 +241,12 @@ func (n *NetworkNode) SendMessage(ctx context.Context, peerID peer.ID, msg *pb.M
 }
 
 // RegisterStreamHandler sets up the stream handler for the protocol.
-func (n *NetworkNode) RegisterStreamHandler() {
+func (n *Node) RegisterStreamHandler() {
 	n.host.SetStreamHandler(protocol.ID(ProtocolID), n.HandleStream)
 }
 
 // BroadcastBlock sends a block to all connected peers.
-func (n *NetworkNode) BroadcastBlock(ctx context.Context, block *pb.Block) {
+func (n *Node) BroadcastBlock(ctx context.Context, block *pb.Block) {
 	peers := n.host.Peerstore().Peers()
 	for _, peerID := range peers {
 		if peerID == n.host.ID() {
@@ -269,4 +270,39 @@ func (n *NetworkNode) BroadcastBlock(ctx context.Context, block *pb.Block) {
 			log.Printf("Sent block to peer %s", peerID)
 		}
 	}
+}
+
+// IncreaseReputation increases the node's reputation score by a given amount.
+func (n *Node) IncreaseReputation(amount int) {
+	n.Reputation += amount
+}
+
+// DecreaseReputation decreases the node's reputation score by a given amount (minimum 0).
+func (n *Node) DecreaseReputation(amount int) {
+	n.Reputation -= amount
+	if n.Reputation < 0 {
+		n.Reputation = 0
+	}
+}
+
+// GetReputation returns the current reputation score of the node.
+func (n *Node) GetReputation() int {
+	return n.Reputation
+}
+
+// Example: Use reputation in block validation (pseudo-logic)
+// Increase reputation for valid block, decrease for invalid block
+func (n *Node) OnBlockReceived(valid bool) {
+	if valid {
+		n.IncreaseReputation(10) // Reward for valid block
+	} else {
+		n.DecreaseReputation(20) // Penalty for invalid block
+	}
+	log.Printf("Node %s reputation updated: %d", n.host.ID().String(), n.Reputation)
+}
+
+// Example: Only accept blocks from nodes above a reputation threshold
+func (n *Node) ShouldAcceptBlockFrom(peerReputation int) bool {
+	const minReputation = 50
+	return peerReputation >= minReputation
 }

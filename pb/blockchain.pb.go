@@ -86,6 +86,7 @@ type BlockHeader struct {
 	Version       uint32                 `protobuf:"varint,1,opt,name=version,proto3" json:"version,omitempty"`
 	PrevBlockHash []byte                 `protobuf:"bytes,2,opt,name=prev_block_hash,json=prevBlockHash,proto3" json:"prev_block_hash,omitempty"`
 	MerkleRoot    []byte                 `protobuf:"bytes,3,opt,name=merkle_root,json=merkleRoot,proto3" json:"merkle_root,omitempty"`
+	ForestRoot    []byte                 `protobuf:"bytes,8,opt,name=forest_root,json=forestRoot,proto3" json:"forest_root,omitempty"` // Merkle root of all active shard roots
 	Timestamp     int64                  `protobuf:"varint,4,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
 	Height        uint32                 `protobuf:"varint,5,opt,name=height,proto3" json:"height,omitempty"`
 	Nonce         uint64                 `protobuf:"varint,6,opt,name=nonce,proto3" json:"nonce,omitempty"` // bytes difficulty_target = 7; // Add later if needed
@@ -144,6 +145,13 @@ func (x *BlockHeader) GetMerkleRoot() []byte {
 	return nil
 }
 
+func (x *BlockHeader) GetForestRoot() []byte {
+	if x != nil {
+		return x.ForestRoot
+	}
+	return nil
+}
+
 func (x *BlockHeader) GetTimestamp() int64 {
 	if x != nil {
 		return x.Timestamp
@@ -170,6 +178,7 @@ type Block struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Header        *BlockHeader           `protobuf:"bytes,1,opt,name=header,proto3" json:"header,omitempty"`
 	Transactions  []*Transaction         `protobuf:"bytes,2,rep,name=transactions,proto3" json:"transactions,omitempty"`
+	ShardRoots    [][]byte               `protobuf:"bytes,3,rep,name=shard_roots,json=shardRoots,proto3" json:"shard_roots,omitempty"` // List of all active shard Merkle roots
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -214,6 +223,13 @@ func (x *Block) GetHeader() *BlockHeader {
 func (x *Block) GetTransactions() []*Transaction {
 	if x != nil {
 		return x.Transactions
+	}
+	return nil
+}
+
+func (x *Block) GetShardRoots() [][]byte {
+	if x != nil {
+		return x.ShardRoots
 	}
 	return nil
 }
@@ -308,18 +324,22 @@ const file_pb_blockchain_proto_rawDesc = "" +
 	"\x13pb/blockchain.proto\x12\x02pb\"5\n" +
 	"\vTransaction\x12\x12\n" +
 	"\x04data\x18\x01 \x01(\fR\x04data\x12\x12\n" +
-	"\x04hash\x18\a \x01(\fR\x04hash\"\xbc\x01\n" +
+	"\x04hash\x18\a \x01(\fR\x04hash\"\xdd\x01\n" +
 	"\vBlockHeader\x12\x18\n" +
 	"\aversion\x18\x01 \x01(\rR\aversion\x12&\n" +
 	"\x0fprev_block_hash\x18\x02 \x01(\fR\rprevBlockHash\x12\x1f\n" +
 	"\vmerkle_root\x18\x03 \x01(\fR\n" +
-	"merkleRoot\x12\x1c\n" +
+	"merkleRoot\x12\x1f\n" +
+	"\vforest_root\x18\b \x01(\fR\n" +
+	"forestRoot\x12\x1c\n" +
 	"\ttimestamp\x18\x04 \x01(\x03R\ttimestamp\x12\x16\n" +
 	"\x06height\x18\x05 \x01(\rR\x06height\x12\x14\n" +
-	"\x05nonce\x18\x06 \x01(\x04R\x05nonce\"e\n" +
+	"\x05nonce\x18\x06 \x01(\x04R\x05nonce\"\x86\x01\n" +
 	"\x05Block\x12'\n" +
 	"\x06header\x18\x01 \x01(\v2\x0f.pb.BlockHeaderR\x06header\x123\n" +
-	"\ftransactions\x18\x02 \x03(\v2\x0f.pb.TransactionR\ftransactions\"l\n" +
+	"\ftransactions\x18\x02 \x03(\v2\x0f.pb.TransactionR\ftransactions\x12\x1f\n" +
+	"\vshard_roots\x18\x03 \x03(\fR\n" +
+	"shardRoots\"l\n" +
 	"\aMessage\x12!\n" +
 	"\x05block\x18\x01 \x01(\v2\t.pb.BlockH\x00R\x05block\x123\n" +
 	"\vtransaction\x18\x02 \x01(\v2\x0f.pb.TransactionH\x00R\vtransactionB\t\n" +

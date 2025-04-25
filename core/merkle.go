@@ -151,3 +151,165 @@ func NewMerkleTree(data [][]byte) (*MerkleTree, error) {
 	tree := MerkleTree{RootNode: nodes[0]}
 	return &tree, nil
 }
+
+// MerkleProof represents a standard Merkle proof for a leaf.
+type MerkleProof struct {
+	LeafHash []byte   // The hash of the leaf being proven
+	Siblings [][]byte // The sibling hashes along the path to the root
+	PathBits []bool   // true if the leaf is a left child at each level, false if right
+}
+
+// GenerateMerkleProof generates a Merkle proof for a given leaf index.
+func GenerateMerkleProof(tree *MerkleTree, leafIndex int, leaves [][]byte) *MerkleProof {
+	if tree == nil || tree.RootNode == nil || leafIndex < 0 || leafIndex >= len(leaves) {
+		return nil
+	}
+	var siblings [][]byte
+	var pathBits []bool
+	numLeaves := len(leaves)
+	index := leafIndex
+	levelNodes := make([][]byte, numLeaves)
+	copy(levelNodes, leaves)
+	for numLeaves > 1 {
+		var nextLevel [][]byte
+		for i := 0; i < numLeaves; i += 2 {
+			left := levelNodes[i]
+			var right []byte
+			if i+1 < numLeaves {
+				right = levelNodes[i+1]
+			} else {
+				right = left
+			}
+			hash := sha256.Sum256(append(left, right...))
+			nextLevel = append(nextLevel, hash[:])
+		}
+		// Record sibling for the current index
+		if index%2 == 0 {
+			// Sibling is to the right
+			if index+1 < numLeaves {
+				siblings = append(siblings, levelNodes[index+1])
+			} else {
+				siblings = append(siblings, levelNodes[index])
+			}
+			pathBits = append(pathBits, true)
+		} else {
+			// Sibling is to the left
+			siblings = append(siblings, levelNodes[index-1])
+			pathBits = append(pathBits, false)
+		}
+		index /= 2
+		levelNodes = nextLevel
+		numLeaves = len(levelNodes)
+	}
+	return &MerkleProof{
+		LeafHash: leaves[leafIndex],
+		Siblings: siblings,
+		PathBits: pathBits,
+	}
+}
+
+// CompressedMerkleProof uses a bitmap for the path.
+type CompressedMerkleProof struct {
+	LeafHash   []byte
+	Siblings   [][]byte
+	PathBitmap uint64 // Up to 64 levels; 1=left, 0=right
+	Depth      int
+}
+
+func CompressMerkleProof(proof *MerkleProof) *CompressedMerkleProof {
+	var bitmap uint64
+	for i, bit := range proof.PathBits {
+		if bit {
+			bitmap |= (1 << i)
+		}
+	}
+	return &CompressedMerkleProof{
+		LeafHash:   proof.LeafHash,
+		Siblings:   proof.Siblings,
+		PathBitmap: bitmap,
+		Depth:      len(proof.PathBits),
+	}
+}
+
+func VerifyCompressedMerkleProofCompressed(proof *CompressedMerkleProof, root []byte) bool {
+	if proof == nil || len(proof.Siblings) == 0 {
+		return false
+	}
+	current := proof.LeafHash
+	for i := 0; i < proof.Depth; i++ {
+		if (proof.PathBitmap & (1 << i)) != 0 {
+			// left
+			combined := append(current, proof.Siblings[i]...)
+			h := sha256.Sum256(combined)
+			current = h[:]
+		} else {
+			// right
+			combined := append(proof.Siblings[i], current...)
+			h := sha256.Sum256(combined)
+			current = h[:]
+		}
+	}
+	return bytes.Equal(current, root)
+}
+
+// MerkleProofForShardInForest generates a Merkle proof for a shard's root in the forest root.
+func MerkleProofForShardInForest(shardID string) (*MerkleProof, *CompressedMerkleProof, error) {
+	// Collect all active shard roots in order
+	var shardIDs []string
+	var shardRoots [][]byte
+	for id, shard := range ShardRegistry {
+		if len(shard.MerkleRoot) > 0 {
+			shardIDs = append(shardIDs, id)
+			shardRoots = append(shardRoots, shard.MerkleRoot)
+		}
+	}
+	// Find the index of the requested shard
+	var idx int = -1
+	for i, id := range shardIDs {
+		if id == shardID {
+			idx = i
+			break
+		}
+	}
+	if idx == -1 {
+		return nil, nil, fmt.Errorf("shard %s not found or has no Merkle root", shardID)
+	}
+	// Build the forest Merkle tree
+	forestTree, err := NewMerkleTree(shardRoots)
+	if err != nil {
+		return nil, nil, err
+	}
+	// Generate and compress the Merkle proof for this shard's root
+	proof := GenerateMerkleProof(forestTree, idx, shardRoots)
+	compressed := CompressMerkleProof(proof)
+	return proof, compressed, nil
+}
+
+// Test function for Merkle proof-of-inclusion for a shard in the forest root
+func TestMerkleProofOfShardInForest() {
+	// Simulate three shards with dummy roots
+	shardA := CreateShard("shardA", "")
+	shardB := CreateShard("shardB", "")
+	shardC := CreateShard("shardC", "")
+	shardA.MerkleRoot = []byte("rootA")
+	shardB.MerkleRoot = []byte("rootB")
+	shardC.MerkleRoot = []byte("rootC")
+
+	// Build the forest root
+	forestTree, err := NewMerkleTree([][]byte{shardA.MerkleRoot, shardB.MerkleRoot, shardC.MerkleRoot})
+	if err != nil {
+		fmt.Println("Forest tree error:", err)
+		return
+	}
+	forestRoot := forestTree.RootNode.Data
+	fmt.Printf("Forest root: %x\n", forestRoot)
+
+	// Generate and verify proof for shardB
+	_, compressed, err := MerkleProofForShardInForest("shardB")
+	if err != nil {
+		fmt.Println("Proof error:", err)
+		return
+	}
+	valid := VerifyCompressedMerkleProofCompressed(compressed, forestRoot)
+	fmt.Println("Compressed proof for shardB valid:", valid)
+}

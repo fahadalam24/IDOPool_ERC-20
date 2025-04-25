@@ -24,6 +24,7 @@ message BlockHeader {
   uint32 version = 1;
   bytes prev_block_hash = 2;
   bytes merkle_root = 3;
+  bytes forest_root = 8; // Merkle root of all active shard roots
   int64 timestamp = 4;
   uint32 height = 5;
   uint64 nonce = 6;
@@ -34,6 +35,7 @@ message BlockHeader {
 message Block {
   BlockHeader header = 1;
   repeated Transaction transactions = 2;
+  repeated bytes shard_roots = 3; // List of all active shard Merkle roots
   // Note: The block hash itself isn't stored *in* the block proto,
   // as it's derived from the header.
 }

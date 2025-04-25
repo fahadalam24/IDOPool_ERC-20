@@ -1,6 +1,7 @@
 package core
 
 import (
+	"fmt"
 	"github.com/dgraph-io/badger/v4"
 	"google.golang.org/protobuf/proto"
 	"go-blockchain/pb"
@@ -129,6 +130,11 @@ func (bc *Blockchain) AddBlock(transactions []*Transaction) (*Block, error) {
 	newBlock, err := NewBlock(transactions, latestBlock.Header.Height+1, bc.tipHash)
 	if err != nil {
 		return nil, err
+	}
+
+	// Validate the block before adding it to the blockchain
+	if err := newBlock.validateBlock(); err != nil {
+		return nil, fmt.Errorf("block validation failed: %w", err)
 	}
 
 	err = bc.storeBlock(newBlock)

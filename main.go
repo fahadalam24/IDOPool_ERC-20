@@ -128,6 +128,9 @@ func main() {
 	// Handle received blocks in the network node
 	node.RegisterStreamHandler()
 
+	// Start adaptive shard monitor: check every 10 seconds, split if TxCount > 5, merge if TxCount < 2
+	core.AdaptiveShardMonitor(10, 5, 2)
+
 	// Wait for termination signal
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
@@ -141,6 +144,11 @@ func main() {
 	// --- Print blockchain info (optional, mainly for debugging now) ---
 	log.Println("\n--- Final Blockchain State ---")
 	printBlockchainInfo(bc) // Extracted printing logic into a function
+
+	// Test shard rebalancing
+	core.TestShardCompactState()
+	core.TestMerkleProofOfShardInForest()
+	os.Exit(0) // Exit after running the Merkle proof-of-inclusion test to show output only for the test
 }
 
 // printBlockchainInfo prints summary information about the blockchain.

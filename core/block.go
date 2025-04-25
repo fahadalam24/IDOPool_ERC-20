@@ -15,21 +15,22 @@ import (
 )
 
 // BlockHeader defines the header structure of a block.
-// Keep core struct definition as is.
 type BlockHeader struct {
 	Version       uint32    `json:"version"`
 	PrevBlockHash []byte    `json:"prevBlockHash"`
 	MerkleRoot    []byte    `json:"merkleRoot"`
+	ForestRoot    []byte    `json:"forestRoot"` // Merkle root of all active shard roots
 	Timestamp     int64     `json:"timestamp"`
 	Height        uint32    `json:"height"`
 	Nonce         uint64    `json:"nonce"`
+	Difficulty    uint32    `json:"difficulty"` // Mining difficulty
 }
 
 // Block represents a single block in the blockchain.
-// Keep core struct definition as is.
 type Block struct {
 	Header       *BlockHeader    `json:"header"`
 	Transactions []*Transaction `json:"transactions"`
+	ShardRoots   [][]byte        `json:"shardRoots"` // List of all active shard Merkle roots
 	hash         []byte          // Cached hash of the block (specifically the header)
 }
 
@@ -41,13 +42,13 @@ func (h *BlockHeader) ToProto() *pb.BlockHeader {
 		Version:       h.Version,
 		PrevBlockHash: h.PrevBlockHash,
 		MerkleRoot:    h.MerkleRoot,
+		ForestRoot:    h.ForestRoot, // Map new field
 		Timestamp:     h.Timestamp,
 		Height:        h.Height,
 		Nonce:         h.Nonce,
 	}
 }
 
-// HeaderFromProto converts a pb.BlockHeader back to a core.BlockHeader.
 func HeaderFromProto(pbHeader *pb.BlockHeader) *BlockHeader {
 	if pbHeader == nil {
 		return nil
@@ -56,6 +57,7 @@ func HeaderFromProto(pbHeader *pb.BlockHeader) *BlockHeader {
 		Version:       pbHeader.Version,
 		PrevBlockHash: pbHeader.PrevBlockHash,
 		MerkleRoot:    pbHeader.MerkleRoot,
+		ForestRoot:    pbHeader.ForestRoot, // Map new field
 		Timestamp:     pbHeader.Timestamp,
 		Height:        pbHeader.Height,
 		Nonce:         pbHeader.Nonce,
@@ -107,6 +109,7 @@ func (b *Block) ToProto() (*pb.Block, error) {
 	return &pb.Block{
 		Header:       pbHeader,
 		Transactions: pbTransactions,
+		ShardRoots:   b.ShardRoots, // Map new field
 	}, nil
 }
 
@@ -121,16 +124,31 @@ func BlockFromProto(pbBlock *pb.Block) *Block {
 		transactions[i] = TransactionFromProto(pbTx) // Convert transactions back
 	}
 
-	// Note: The block hash is not part of the proto, it needs recalculation
-	// or separate handling upon receiving a block.
 	block := &Block{
 		Header:       header,
 		Transactions: transactions,
-		// hash is initially nil, will be calculated by Hash()
+		ShardRoots:   pbBlock.ShardRoots, // Map new field
 	}
 	return block
 }
 
+// BuildForestRoot collects all active shard Merkle roots and builds a Merkle tree from them.
+func BuildForestRoot() ([]byte, [][]byte, error) {
+	var shardRoots [][]byte
+	for _, shard := range ShardRegistry {
+		if len(shard.MerkleRoot) > 0 {
+			shardRoots = append(shardRoots, shard.MerkleRoot)
+		}
+	}
+	if len(shardRoots) == 0 {
+		return nil, nil, nil // No active shards
+	}
+	forestTree, err := NewMerkleTree(shardRoots)
+	if err != nil {
+		return nil, nil, err
+	}
+	return forestTree.RootNode.Data, shardRoots, nil
+}
 
 // CalculateMerkleRoot remains largely the same, but relies on the updated tx.Hash()
 func CalculateMerkleRoot(transactions []*Transaction) ([]byte, error) {
@@ -170,7 +188,6 @@ func CalculateMerkleRoot(transactions []*Transaction) ([]byte, error) {
 	return merkleTree.RootNode.Data, nil
 }
 
-
 // CalculateHash calculates the hash of the block header using Protobuf encoding.
 func (b *Block) CalculateHash() ([]byte, error) {
 	if b.Header == nil {
@@ -204,7 +221,6 @@ func (b *Block) Hash() ([]byte, error) {
 	return hash, nil
 }
 
-
 // NewBlock creates a new block. (Uses updated CalculateMerkleRoot implicitly via tx.Hash)
 func NewBlock(transactions []*Transaction, height uint32, prevBlockHash []byte) (*Block, error) {
 	// CalculateMerkleRoot will use the new proto-based tx.Hash()
@@ -214,18 +230,28 @@ func NewBlock(transactions []*Transaction, height uint32, prevBlockHash []byte) 
 		return nil, fmt.Errorf("merkle root calculation failed: %w", err)
 	}
 
+	// Calculate the forest root and collect all shard roots
+	forestRoot, shardRoots, err := BuildForestRoot()
+	if err != nil {
+		log.Printf("Failed to calculate forest root: %v", err)
+		return nil, fmt.Errorf("forest root calculation failed: %w", err)
+	}
+
 	header := &BlockHeader{
 		Version:       1,
 		PrevBlockHash: prevBlockHash,
 		MerkleRoot:    merkleRoot,
+		ForestRoot:    forestRoot,
 		Timestamp:     time.Now().Unix(),
 		Height:        height,
 		Nonce:         0, // Set during mining/consensus
+		Difficulty:    1, // Set a low difficulty for testing
 	}
 
 	block := &Block{
 		Header:       header,
 		Transactions: transactions,
+		ShardRoots:   shardRoots,
 	}
 
 	// Calculate and cache the hash upon creation using the new CalculateHash
@@ -234,9 +260,13 @@ func NewBlock(transactions []*Transaction, height uint32, prevBlockHash []byte) 
 		return nil, fmt.Errorf("block hashing failed during creation: %w", err)
 	}
 
+	// Mine the block before returning it
+	if err := block.MineBlock(); err != nil {
+		return nil, fmt.Errorf("failed to mine block: %w", err)
+	}
+
 	return block, nil
 }
-
 
 // NewGenesisBlock creates the first block in the chain (the Genesis block).
 func NewGenesisBlock(genesisTx *Transaction) (*Block, error) {
@@ -251,4 +281,51 @@ func NewGenesisBlock(genesisTx *Transaction) (*Block, error) {
 	}
 	// Genesis block has height 0 and no previous block hash
 	return NewBlock(transactions, 0, []byte{})
+}
+
+// MineBlock performs the Proof-of-Work mining process for a block.
+func (b *Block) MineBlock() error {
+	log.Printf("Testing simulated nonce: %d", b.Header.Nonce)
+	target := uint32(1 << (32 - b.Header.Difficulty))
+	for i := uint64(1); i < 100000; i++ { // Test a larger range of nonce values
+		b.Header.Nonce = i
+		hash, err := b.Hash()
+		if err != nil {
+			return fmt.Errorf("failed to calculate block hash during mining simulation: %w", err)
+		}
+
+		// Convert the first 4 bytes of the hash to an integer
+		var hashInt uint32
+		for j := 0; j < 4; j++ {
+			hashInt = (hashInt << 8) | uint32(hash[j])
+		}
+
+		if hashInt < target {
+			log.Printf("Mining success with nonce %d", b.Header.Nonce)
+			return nil
+		}
+	}
+
+	return fmt.Errorf("no valid nonce found in the range")
+}
+
+// validateBlock checks if a block satisfies the Proof-of-Work requirements.
+func (b *Block) validateBlock() error {
+	target := uint32(1 << (32 - b.Header.Difficulty))
+	hash, err := b.Hash()
+	if err != nil {
+		return fmt.Errorf("failed to calculate block hash during validation: %w", err)
+	}
+
+	// Convert the first 4 bytes of the hash to an integer
+	var hashInt uint32
+	for i := 0; i < 4; i++ {
+		hashInt = (hashInt << 8) | uint32(hash[i])
+	}
+
+	if hashInt >= target {
+		return fmt.Errorf("block does not satisfy Proof-of-Work requirements")
+	}
+
+	return nil
 }
