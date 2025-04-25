@@ -10,6 +10,7 @@ import (
 	"os/signal"
 	"strings" // For splitting bootstrap peers
 	"syscall"
+	"time"
 
 	"go-blockchain/core"
 	"go-blockchain/network" // Import the new network package
@@ -19,7 +20,7 @@ func main() {
 	// --- Command Line Flags ---
 	listenPort := flag.Int("port", 0, "Port number for the node to listen on (0 for random)")
 	bootstrapPeersStr := flag.String("peers", "", "Comma-separated list of bootstrap peer multiaddresses")
-	useMDNS := flag.Bool("mdns", true, "Enable mDNS discovery for local network") // Default to true for easy testing
+	useMDNS := flag.Bool("mdns", false, "Enable mDNS discovery for local network") // Default to false
 	mdnsTag := flag.String("mdnsTag", "go-blockchain-dev", "mDNS service tag for discovery")
 	flag.Parse()
 
@@ -28,10 +29,14 @@ func main() {
 	// --- Initialize Core Blockchain ---
 	// (Keep genesis simple for now, can enhance later)
 	genesisTx := core.NewTransaction([]byte("Genesis Transaction"))
-	bc, err := core.NewBlockchain(genesisTx)
+	// Initialize the blockchain with persistence
+	dbPath := fmt.Sprintf("blockchain_data_%d", *listenPort)
+	bc, err := core.NewBlockchain(genesisTx, dbPath)
 	if err != nil {
 		log.Fatalf("Failed to initialize blockchain: %v", err)
 	}
+	defer bc.Close() // Ensure the database is closed on exit
+
 	log.Println("Core blockchain initialized.")
 
 	// --- Initialize Networking ---
@@ -76,37 +81,52 @@ func main() {
 		fmt.Printf(" Node is running! Your Multiaddress is:\n %s\n", nodeAddr)
 		fmt.Println("==================================================")
 		fmt.Println("Pass this address to other nodes using the -peers flag.")
+
+		// Save the address to a file
+		err = os.WriteFile("node_address.txt", []byte(nodeAddr), 0644)
+		if err != nil {
+			log.Printf("Failed to save node address to file: %v", err)
+		} else {
+			log.Println("Node address saved to 'node_address.txt'.")
+		}
 	}
 
 	// --- Keep the application running & handle shutdown ---
 	log.Println("Node setup complete. Running...")
-	// (Example: Add a block every 30 seconds - remove/modify later)
-	/*
-	   go func() {
-	       ticker := time.NewTicker(30 * time.Second)
-	       defer ticker.Stop()
-	       blockCounter := 1
-	       for {
-	           select {
-	           case <-ticker.C:
-	               log.Printf("Simulating block creation...")
-	               txData := fmt.Sprintf("Block %d Data - Time %d", blockCounter, time.Now().Unix())
-	               newTx := core.NewTransaction([]byte(txData))
-	               newBlock, err := bc.AddBlock([]*core.Transaction{newTx})
-	               if err != nil {
-	                   log.Printf("Error adding simulated block: %v", err)
-	               } else {
-	                   // TODO: Broadcast the new block to peers via the network node
-	                   blockHash, _ := newBlock.Hash()
-	                   log.Printf("Added simulated Block %d with hash %x", newBlock.Header.Height, blockHash)
-	               }
-	               blockCounter++
-	           case <-ctx.Done(): // Listen for context cancellation
-	               return
-	           }
-	       }
-	   }()
-	*/
+	// (Example: Broadcast a new block when created)
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		blockCounter := 1
+		for {
+			select {
+			case <-ticker.C:
+				log.Printf("Creating and broadcasting block %d...", blockCounter)
+				txData := fmt.Sprintf("Block %d Data - Time %d", blockCounter, time.Now().Unix())
+				newTx := core.NewTransaction([]byte(txData))
+				newBlock, err := bc.AddBlock([]*core.Transaction{newTx})
+				if err != nil {
+					log.Printf("Error adding block: %v", err)
+					continue
+				}
+
+				blockProto, err := newBlock.ToProto()
+				if err != nil {
+					log.Printf("Error converting block to Protobuf: %v", err)
+					continue
+				}
+
+				node.BroadcastBlock(ctx, blockProto)
+				log.Printf("Broadcasted block %d", blockCounter)
+				blockCounter++
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	// Handle received blocks in the network node
+	node.RegisterStreamHandler()
 
 	// Wait for termination signal
 	sigCh := make(chan os.Signal, 1)
@@ -125,7 +145,12 @@ func main() {
 
 // printBlockchainInfo prints summary information about the blockchain.
 func printBlockchainInfo(bc *core.Blockchain) {
-	fmt.Printf("Current chain height: %d\n", bc.GetChainHeight())
+	chainHeight, err := bc.GetChainHeight()
+	if err != nil {
+		log.Printf("Error retrieving chain height: %v", err)
+	} else {
+		fmt.Printf("Current chain height: %d\n", chainHeight)
+	}
 	latestBlock, err := bc.GetLatestBlock()
 	if err == nil {
 		latestBlockHash, _ := latestBlock.Hash()

@@ -1,6 +1,7 @@
 package network
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"log"
@@ -9,9 +10,17 @@ import (
 
 	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p/core/host"
+	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/libp2p/go-libp2p/core/protocol"
 	"github.com/libp2p/go-libp2p/p2p/discovery/mdns" // For local discovery
 	"github.com/multiformats/go-multiaddr"
+	"google.golang.org/protobuf/proto"
+	"go-blockchain/pb"
+)
+
+const (
+	ProtocolID = "/go-blockchain/1.0.0"
 )
 
 // NetworkNode represents a node in the P2P network.
@@ -177,4 +186,87 @@ func (n *NetworkNode) Close() error {
 	log.Println("Shutting down network node...")
 	// TODO: Close discovery services if needed
 	return n.host.Close()
+}
+
+// HandleStream processes incoming streams and decodes Protobuf messages.
+func (n *NetworkNode) HandleStream(s network.Stream) {
+	defer s.Close()
+
+	buf := new(bytes.Buffer)
+	if _, err := buf.ReadFrom(s); err != nil {
+		log.Printf("Error reading from stream: %v", err)
+		return
+	}
+
+	msg := &pb.Message{}
+	if err := proto.Unmarshal(buf.Bytes(), msg); err != nil {
+		log.Printf("Error unmarshalling Protobuf message: %v", err)
+		return
+	}
+
+	switch payload := msg.Payload.(type) {
+	case *pb.Message_Block:
+		// Process the block payload
+		if block := payload.Block; block != nil {
+			log.Printf("Received block with height %d", block.Header.Height)
+			// TODO: Validate and add the block to the blockchain
+		}
+	case *pb.Message_Transaction:
+		log.Printf("Received transaction from peer: %s", s.Conn().RemotePeer())
+		// TODO: Pass the transaction to the blockchain logic
+	default:
+		log.Printf("Unknown message type received")
+	}
+}
+
+// SendMessage sends a Protobuf message to a specific peer.
+func (n *NetworkNode) SendMessage(ctx context.Context, peerID peer.ID, msg *pb.Message) error {
+	stream, err := n.host.NewStream(ctx, peerID, protocol.ID(ProtocolID))
+	if err != nil {
+		return fmt.Errorf("failed to create stream: %w", err)
+	}
+	defer stream.Close()
+
+	data, err := proto.Marshal(msg)
+	if err != nil {
+		return fmt.Errorf("failed to marshal Protobuf message: %w", err)
+	}
+
+	if _, err := stream.Write(data); err != nil {
+		return fmt.Errorf("failed to write to stream: %w", err)
+	}
+
+	return nil
+}
+
+// RegisterStreamHandler sets up the stream handler for the protocol.
+func (n *NetworkNode) RegisterStreamHandler() {
+	n.host.SetStreamHandler(protocol.ID(ProtocolID), n.HandleStream)
+}
+
+// BroadcastBlock sends a block to all connected peers.
+func (n *NetworkNode) BroadcastBlock(ctx context.Context, block *pb.Block) {
+	peers := n.host.Peerstore().Peers()
+	for _, peerID := range peers {
+		if peerID == n.host.ID() {
+			continue // Skip sending to self
+		}
+
+		msg := &pb.Message{
+			Payload: &pb.Message_Block{
+				Block: block,
+			},
+		}
+
+		err := n.SendMessage(ctx, peerID, msg)
+		if err != nil {
+			if strings.Contains(err.Error(), "peer id mismatch") {
+				log.Printf("Peer ID mismatch for peer %s (multiaddress: %s). Skipping.", peerID, n.host.Peerstore().PeerInfo(peerID).Addrs)
+				continue
+			}
+			log.Printf("Failed to send block to peer %s: %v", peerID, err)
+		} else {
+			log.Printf("Sent block to peer %s", peerID)
+		}
+	}
 }

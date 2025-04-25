@@ -1,124 +1,159 @@
 package core
 
 import (
-	"errors"
+	"github.com/dgraph-io/badger/v4"
+	"google.golang.org/protobuf/proto"
+	"go-blockchain/pb"
 	"log"
-	"sync" // To protect access to the chain if we add concurrency later
-	"bytes"
-	
 )
 
-// Blockchain holds the sequence of blocks.
+// Blockchain represents the blockchain with a persistent database.
 type Blockchain struct {
-	mu     sync.RWMutex // Read-write mutex for thread safety
-	blocks []*Block     // The chain of blocks
-	// TODO: Add database backend later for persistence
-	// TODO: Add index structures (e.g., map[hash]*Block) for faster lookups
+	db      *badger.DB
+	tipHash []byte // Hash of the latest block
 }
 
-// NewBlockchain creates a new blockchain with a genesis block.
-func NewBlockchain(genesisTx *Transaction) (*Blockchain, error) {
-	genesisBlock, err := NewGenesisBlock(genesisTx)
-    if err != nil {
-        return nil, err
-    }
-	log.Println("Genesis Block created.")
-	return &Blockchain{blocks: []*Block{genesisBlock}}, nil
-}
-
-// AddBlock adds a new block to the blockchain after validation.
-func (bc *Blockchain) AddBlock(transactions []*Transaction) (*Block, error) {
-	bc.mu.Lock() // Lock for writing
-	defer bc.mu.Unlock()
-
-	prevBlock := bc.blocks[len(bc.blocks)-1]
-	prevBlockHash, err := prevBlock.Hash()
+// NewBlockchain initializes a new blockchain with persistence.
+func NewBlockchain(genesisTx *Transaction, dbPath string) (*Blockchain, error) {
+	// Open the BadgerDB database
+	db, err := badger.Open(badger.DefaultOptions(dbPath))
 	if err != nil {
-		log.Printf("Error getting previous block hash: %v", err)
 		return nil, err
 	}
 
-	newHeight := prevBlock.Header.Height + 1
-	newBlock, err := NewBlock(transactions, newHeight, prevBlockHash)
-    if err != nil {
-        log.Printf("Error creating new block: %v", err)
-        return nil, err
-    }
+	bc := &Blockchain{db: db}
 
-
-	
-	// 1. Check previous block hash pointer
-	if !bytes.Equal(newBlock.Header.PrevBlockHash, prevBlockHash) {
-		log.Printf("Validation Error: New block's PrevBlockHash (%x) does not match actual previous hash (%x)", newBlock.Header.PrevBlockHash, prevBlockHash)
-		return nil, errors.New("invalid previous block hash")
+	// Check if the database is empty
+	err = db.View(func(txn *badger.Txn) error {
+		_, err := txn.Get([]byte("lh")) // "lh" stands for "last hash"
+		if err == badger.ErrKeyNotFound {
+			// Database is empty, create the genesis block
+			log.Println("Creating genesis block...")
+			genesisBlock, err := NewGenesisBlock(genesisTx)
+			if err != nil {
+				return err
+			}
+			return bc.storeBlock(genesisBlock)
+		}
+		return err
+	})
+	if err != nil {
+		db.Close()
+		return nil, err
 	}
 
-	// 2. Check block height
-	if newBlock.Header.Height != newHeight {
-		log.Printf("Validation Error: New block's height (%d) is incorrect, expected (%d)", newBlock.Header.Height, newHeight)
-		return nil, errors.New("invalid block height")
+	// Load the tip hash
+	err = db.View(func(txn *badger.Txn) error {
+		item, err := txn.Get([]byte("lh"))
+		if err != nil {
+			return err
+		}
+		return item.Value(func(val []byte) error {
+			bc.tipHash = append([]byte{}, val...)
+			return nil
+		})
+	})
+	if err != nil {
+		db.Close()
+		return nil, err
 	}
 
-    // 3. Recalculate and verify block hash (integrity check)
-    // Note: We trust CalculateHash for now, but a full node would re-validate everything
-    calculatedHash, err := newBlock.CalculateHash()
-    if err != nil {
-        log.Printf("Validation Error: Failed to recalculate hash for new block: %v", err)
-        return nil, err
-    }
-    blockHash, _ := newBlock.Hash() // Get cached/calculated hash
-    if !bytes.Equal(calculatedHash, blockHash) {
-         log.Printf("Validation Error: Block hash verification failed. Recalculated: %x, Stored: %x", calculatedHash, blockHash)
-        return nil, errors.New("block hash verification failed")
-    }
+	return bc, nil
+}
 
+// storeBlock saves a block to the database.
+func (bc *Blockchain) storeBlock(block *Block) error {
+	return bc.db.Update(func(txn *badger.Txn) error {
+		blockHash, err := block.Hash()
+		if err != nil {
+			return err
+		}
 
-	// TODO: Add more validation: transaction validation, PoW check, signature checks etc.
+		blockProto, err := block.ToProto()
+		if err != nil {
+			return err
+		}
 
-	bc.blocks = append(bc.blocks, newBlock)
-	log.Printf("Added Block %d with hash %x", newBlock.Header.Height, blockHash)
+		blockBytes, err := proto.Marshal(blockProto)
+		if err != nil {
+			return err
+		}
+
+		// Store the block by its hash
+		err = txn.Set(blockHash, blockBytes)
+		if err != nil {
+			return err
+		}
+
+		// Update the last hash
+		err = txn.Set([]byte("lh"), blockHash)
+		if err != nil {
+			return err
+		}
+
+		bc.tipHash = blockHash
+		return nil
+	})
+}
+
+// getBlockByHash retrieves a block from the database by its hash.
+func (bc *Blockchain) getBlockByHash(hash []byte) (*Block, error) {
+	var block *Block
+	err := bc.db.View(func(txn *badger.Txn) error {
+		item, err := txn.Get(hash)
+		if err != nil {
+			return err
+		}
+		return item.Value(func(val []byte) error {
+			blockProto := &pb.Block{}
+			if err := proto.Unmarshal(val, blockProto); err != nil {
+				return err
+			}
+			block = BlockFromProto(blockProto)
+			return nil
+		})
+	})
+	if err != nil {
+		return nil, err
+	}
+	return block, nil
+}
+
+// AddBlock adds a new block to the blockchain.
+func (bc *Blockchain) AddBlock(transactions []*Transaction) (*Block, error) {
+	latestBlock, err := bc.getBlockByHash(bc.tipHash)
+	if err != nil {
+		return nil, err
+	}
+
+	newBlock, err := NewBlock(transactions, latestBlock.Header.Height+1, bc.tipHash)
+	if err != nil {
+		return nil, err
+	}
+
+	err = bc.storeBlock(newBlock)
+	if err != nil {
+		return nil, err
+	}
+
 	return newBlock, nil
 }
 
-// GetBlockByHeight returns a block by its height.
-func (bc *Blockchain) GetBlockByHeight(height uint32) (*Block, error) {
-	bc.mu.RLock() // Lock for reading
-	defer bc.mu.RUnlock()
+// Close closes the database.
+func (bc *Blockchain) Close() {
+	bc.db.Close()
+}
 
-	if int(height) >= len(bc.blocks) {
-		return nil, errors.New("block height out of range")
+// GetChainHeight returns the current height of the blockchain.
+func (bc *Blockchain) GetChainHeight() (uint32, error) {
+	latestBlock, err := bc.getBlockByHash(bc.tipHash)
+	if err != nil {
+		return 0, err
 	}
-	return bc.blocks[height], nil
+	return latestBlock.Header.Height, nil
 }
 
-// GetLatestBlock returns the most recent block in the chain.
+// GetLatestBlock retrieves the latest block in the blockchain.
 func (bc *Blockchain) GetLatestBlock() (*Block, error) {
-    bc.mu.RLock()
-    defer bc.mu.RUnlock()
-
-    if len(bc.blocks) == 0 {
-        return nil, errors.New("blockchain is empty")
-    }
-    return bc.blocks[len(bc.blocks)-1], nil
-}
-
-// GetChainHeight returns the height of the latest block.
-func (bc *Blockchain) GetChainHeight() uint32 {
-     bc.mu.RLock()
-    defer bc.mu.RUnlock()
-    if len(bc.blocks) == 0 {
-        return 0 // Or handle appropriately, maybe return -1 or error?
-    }
-    // Height is index, so length 1 means height 0. Length N means max height N-1.
-    return uint32(len(bc.blocks) - 1)
-}
-
-// GetBlocks returns a copy of all blocks (consider implications for large chains)
-func (bc *Blockchain) GetBlocks() []*Block {
-    bc.mu.RLock()
-    defer bc.mu.RUnlock()
-    // Return a copy to prevent external modification of the internal slice
-    blocksCopy := make([]*Block, len(bc.blocks))
-    copy(blocksCopy, bc.blocks)
-    return blocksCopy
+	return bc.getBlockByHash(bc.tipHash)
 }
