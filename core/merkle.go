@@ -2,6 +2,7 @@ package core
 
 import (
 	"bytes"
+	"compress/gzip"
 	"crypto/sha256"
 	"errors"
 	"fmt" // Added fmt for potential error formatting if needed later
@@ -250,6 +251,104 @@ func VerifyCompressedMerkleProofCompressed(proof *CompressedMerkleProof, root []
 		}
 	}
 	return bytes.Equal(current, root)
+}
+
+// SuperCompressedMerkleProof uses advanced compression techniques
+type SuperCompressedMerkleProof struct {
+	LeafHash []byte
+	CompressedSiblings []byte   // Concatenated and compressed sibling hashes
+	PathBitmap uint64          // Direction bits
+	Depth uint8               // Tree depth
+}
+
+// CompressSiblingsToBytes concatenates and compresses sibling hashes
+func CompressSiblingsToBytes(siblings [][]byte) []byte {
+	// Concatenate all siblings
+	var concatenated []byte
+	for _, sibling := range siblings {
+		concatenated = append(concatenated, sibling...)
+	}
+	
+	// Use gzip compression
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	gz.Write(concatenated)
+	gz.Close()
+	
+	return buf.Bytes()
+}
+
+// DecompressSiblingsFromBytes decompresses sibling hashes
+func DecompressSiblingsFromBytes(compressed []byte, numSiblings int) ([][]byte, error) {
+	// Decompress using gzip
+	gz, err := gzip.NewReader(bytes.NewReader(compressed))
+	if err != nil {
+		return nil, err
+	}
+	defer gz.Close()
+	
+	var decompressed bytes.Buffer
+	_, err = decompressed.ReadFrom(gz)
+	if err != nil {
+		return nil, err
+	}
+	
+	// Split into individual hashes
+	data := decompressed.Bytes()
+	siblings := make([][]byte, numSiblings)
+	hashSize := sha256.Size
+	
+	for i := 0; i < numSiblings; i++ {
+		start := i * hashSize
+		end := start + hashSize
+		if end > len(data) {
+			return nil, fmt.Errorf("decompressed data too short")
+		}
+		siblings[i] = data[start:end]
+	}
+	
+	return siblings, nil
+}
+
+// SuperCompressMerkleProof creates a highly compressed proof
+func SuperCompressMerkleProof(proof *MerkleProof) (*SuperCompressedMerkleProof, error) {
+	compressed := &SuperCompressedMerkleProof{
+		LeafHash: proof.LeafHash,
+		CompressedSiblings: CompressSiblingsToBytes(proof.Siblings),
+		Depth: uint8(len(proof.Siblings)),
+	}
+	
+	// Convert path bits to bitmap
+	for i, isLeft := range proof.PathBits {
+		if isLeft {
+			compressed.PathBitmap |= (1 << uint64(i))
+		}
+	}
+	
+	return compressed, nil
+}
+
+// VerifySuperCompressedProof verifies a super-compressed Merkle proof
+func VerifySuperCompressedProof(proof *SuperCompressedMerkleProof, root []byte) (bool, error) {
+	// Decompress siblings
+	siblings, err := DecompressSiblingsFromBytes(proof.CompressedSiblings, int(proof.Depth))
+	if err != nil {
+		return false, fmt.Errorf("failed to decompress siblings: %w", err)
+	}
+	
+	current := proof.LeafHash
+	for i := uint8(0); i < proof.Depth; i++ {
+		var combined []byte
+		if (proof.PathBitmap & (1 << uint64(i))) != 0 {
+			combined = append(current, siblings[i]...)
+		} else {
+			combined = append(siblings[i], current...)
+		}
+		hash := sha256.Sum256(combined)
+		current = hash[:]
+	}
+	
+	return bytes.Equal(current, root), nil
 }
 
 // MerkleProofForShardInForest generates a Merkle proof for a shard's root in the forest root.

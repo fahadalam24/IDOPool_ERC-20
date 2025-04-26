@@ -136,6 +136,9 @@ func main() {
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	<-sigCh // Block until a signal is received
 
+	log.Println("\n--- Testing Enhanced CAP Theorem Features ---")
+	core.TestCAP()
+	
 	log.Println("Shutdown signal received. Shutting down...")
 	// Context cancellation (done by defer cancel()) will signal goroutines to stop.
 	// Node closing is handled by defer node.Close().

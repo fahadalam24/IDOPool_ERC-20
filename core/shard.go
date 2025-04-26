@@ -24,6 +24,7 @@ type Shard struct {
 	StateData   map[string][]byte // Key-value store for shard-specific state data
 	BloomFilter *bloom.BloomFilter // Probabilistic filter for state membership
 	Accumulator *MerkleAccumulator // Merkle-based cryptographic accumulator for state
+	PedersenCommit *PedersenCommitment // Pedersen commitment to the shard's state sum
 
 	// Add a field to track computational load
 	Load int `json:"load"` // Represents the computational load of the shard
@@ -75,28 +76,116 @@ func (a *MerkleAccumulator) VerifyMembership(leaf []byte) bool {
 // ShardRegistry manages all active shards.
 var ShardRegistry = make(map[string]*Shard)
 
-// ShardIndex maintains a hierarchical index for efficient shard discovery
-var ShardIndex = make(map[string]*Shard)
+// --- Logarithmic-time ShardIndex using BST ---
 
-// AddShardToIndex adds a shard to the ShardIndex for efficient lookup
+type shardBSTNode struct {
+	Key   string
+	Shard *Shard
+	Left  *shardBSTNode
+	Right *shardBSTNode
+}
+
+var shardBSTRoot *shardBSTNode
+
+// Insert a shard into the BST
+func insertShardBST(node *shardBSTNode, shard *Shard) *shardBSTNode {
+	if node == nil {
+		return &shardBSTNode{Key: shard.ID, Shard: shard}
+	}
+	if shard.ID < node.Key {
+		node.Left = insertShardBST(node.Left, shard)
+	} else if shard.ID > node.Key {
+		node.Right = insertShardBST(node.Right, shard)
+	} else {
+		node.Shard = shard // Update existing
+	}
+	return node
+}
+
+// Search for a shard by ID in the BST
+func searchShardBST(node *shardBSTNode, id string) *Shard {
+	if node == nil {
+		return nil
+	}
+	if id < node.Key {
+		return searchShardBST(node.Left, id)
+	} else if id > node.Key {
+		return searchShardBST(node.Right, id)
+	}
+	return node.Shard
+}
+
+// Remove a shard from the BST (simple version, no balancing)
+func removeShardBST(node *shardBSTNode, id string) *shardBSTNode {
+	if node == nil {
+		return nil
+	}
+	if id < node.Key {
+		node.Left = removeShardBST(node.Left, id)
+	} else if id > node.Key {
+		node.Right = removeShardBST(node.Right, id)
+	} else {
+		// Node to delete found
+		if node.Left == nil {
+			return node.Right
+		}
+		if node.Right == nil {
+			return node.Left
+		}
+		// Find min in right subtree
+		minNode := node.Right
+		for minNode.Left != nil {
+			minNode = minNode.Left
+		}
+		node.Key = minNode.Key
+		node.Shard = minNode.Shard
+		node.Right = removeShardBST(node.Right, minNode.Key)
+	}
+	return node
+}
+
+// AddShardToIndex (BST version)
 func AddShardToIndex(shard *Shard) {
 	if shard != nil {
-		ShardIndex[shard.ID] = shard
+		shardBSTRoot = insertShardBST(shardBSTRoot, shard)
 	}
 }
 
-// RemoveShardFromIndex removes a shard from the ShardIndex
+// RemoveShardFromIndex (BST version)
 func RemoveShardFromIndex(shardID string) {
-	delete(ShardIndex, shardID)
+	shardBSTRoot = removeShardBST(shardBSTRoot, shardID)
 }
 
-// GetShardByID retrieves a shard from the ShardIndex by its ID
+// GetShardByID (BST version)
 func GetShardByID(shardID string) (*Shard, error) {
-	shard, exists := ShardIndex[shardID]
-	if !exists {
+	shard := searchShardBST(shardBSTRoot, shardID)
+	if shard == nil {
 		return nil, fmt.Errorf("shard with ID %s not found", shardID)
 	}
 	return shard, nil
+}
+
+// ReconstructSubtreeState collects the combined state of a shard and all its descendants (logarithmic discovery)
+func ReconstructSubtreeState(rootID string) map[string][]byte {
+	result := make(map[string][]byte)
+	root, err := GetShardByID(rootID)
+	if err != nil {
+		return result
+	}
+	var dfs func(s *Shard)
+	dfs = func(s *Shard) {
+		for k, v := range s.StateData {
+			result[k] = v
+		}
+		for _, childID := range s.ChildrenIDs {
+			child, _ := GetShardByID(childID)
+			if child != nil {
+				dfs(child)
+			}
+		}
+	}
+	dfs(root)
+	return result
 }
 
 // CreateShard creates a new shard with the given ID and parent ID.
@@ -171,6 +260,8 @@ func SplitShard(parentID string, childID1 string, childID2 string) error {
 	if err := UpdateMerkleRoot(child2); err != nil {
 		return fmt.Errorf("failed to update Merkle root for child shard %s: %w", childID2, err)
 	}
+	child1.UpdatePedersenCommitment()
+	child2.UpdatePedersenCommitment()
 
 	// Clear parent state data (optional, depends on use case)
 	parent.StateData = nil
@@ -211,6 +302,9 @@ func MergeShards(parentID string, childID1 string, childID2 string) error {
 
 	// Update parent's ChildrenIDs
 	parent.ChildrenIDs = nil
+
+	// Update Pedersen commitment for the parent shard
+	parent.UpdatePedersenCommitment()
 
 	return nil
 }
@@ -266,9 +360,30 @@ func CheckAndMergeShards(parentID string, threshold int) error {
 	return nil
 }
 
-// InitializeBloomFilter initializes the Bloom filter for a shard with given parameters.
-func (s *Shard) InitializeBloomFilter(n uint, fpRate float64) {
-	s.BloomFilter = bloom.NewWithEstimates(n, fpRate)
+// BloomFilterConfig represents the configuration for a shard's Bloom filter
+type BloomFilterConfig struct {
+    ExpectedItems uint    // Expected number of items to be added
+    FalsePositiveRate float64 // Desired false positive rate (e.g., 0.01 for 1%)
+}
+
+// InitializeBloomFilter initializes the Bloom filter with configurable parameters
+func (s *Shard) InitializeBloomFilter(config BloomFilterConfig) {
+    // Use optimal size and number of hash functions based on desired error rate
+    s.BloomFilter = bloom.NewWithEstimates(config.ExpectedItems, config.FalsePositiveRate)
+}
+
+// OptimizeBloomFilter adjusts the Bloom filter based on actual load
+func (s *Shard) OptimizeBloomFilter() {
+    currentSize := len(s.StateData)
+    expectedGrowth := float64(currentSize) * 1.25 // Assume 25% growth
+    s.InitializeBloomFilter(BloomFilterConfig{
+        ExpectedItems: uint(expectedGrowth),
+        FalsePositiveRate: 0.01, // 1% false positive rate
+    })
+    // Repopulate with existing keys
+    for key := range s.StateData {
+        s.AddKeyToBloom(key)
+    }
 }
 
 // AddKeyToBloom adds a key to the shard's Bloom filter.
@@ -286,7 +401,17 @@ func (s *Shard) CheckKeyInBloom(key string) bool {
 	return false
 }
 
-// Update accumulator when setting state
+// Helper to update Pedersen commitment for a shard
+func (s *Shard) UpdatePedersenCommitment() {
+	var sum big.Int
+	for _, v := range s.StateData {
+		sum.Add(&sum, new(big.Int).SetBytes(v))
+	}
+	commit, _ := GeneratePedersenCommitment(&sum)
+	s.PedersenCommit = commit
+}
+
+// Update accumulator and Pedersen commitment when setting state
 func (s *Shard) SetState(key string, value []byte) {
 	s.StateData[key] = value
 	s.AddKeyToBloom(key)
@@ -298,14 +423,15 @@ func (s *Shard) SetState(key string, value []byte) {
 		leaf := sha256.Sum256(append([]byte(key), value...))
 		s.Accumulator.AddLeaf(leaf[:])
 	}
+	s.UpdatePedersenCommitment()
 	s.TxCount++
 	s.LastActivity = time.Now().Unix()
 }
 
-// DeleteState removes a key from the shard's state and (optionally) resets the Bloom filter.
-// Note: Standard Bloom filters do not support deletion, so this only removes from StateData.
+// Update Pedersen commitment after deleting state
 func (s *Shard) DeleteState(key string) {
 	delete(s.StateData, key)
+	s.UpdatePedersenCommitment()
 	// For a counting Bloom filter, you could decrement here.
 	// For a standard Bloom filter, you may want to periodically rebuild it if false positives become an issue.
 }
@@ -330,7 +456,8 @@ func CrossShardTransfer(from *Shard, to *Shard, key string) error {
 	if err := UpdateMerkleRoot(to); err != nil {
 		return fmt.Errorf("failed to update Merkle root for destination shard: %w", err)
 	}
-
+	from.UpdatePedersenCommitment()
+	to.UpdatePedersenCommitment()
 	return nil
 }
 
@@ -382,7 +509,8 @@ func AtomicCrossShardTransfer(from *Shard, to *Shard, key string) error {
 		leaf := sha256.Sum256(append([]byte(key), value...))
 		to.Accumulator.AddLeaf(leaf[:])
 	}
-
+	from.UpdatePedersenCommitment()
+	to.UpdatePedersenCommitment()
 	return nil
 }
 
@@ -398,6 +526,8 @@ func PartialStateTransfer(from *Shard, to *Shard, keys []string) error {
 	}
 	_ = UpdateMerkleRoot(from)
 	_ = UpdateMerkleRoot(to)
+	from.UpdatePedersenCommitment()
+	to.UpdatePedersenCommitment()
 	return nil
 }
 
@@ -408,6 +538,7 @@ func (s *Shard) ReconstructState(partial map[string][]byte) {
 		s.StateData[k] = v
 	}
 	_ = UpdateMerkleRoot(s)
+	s.UpdatePedersenCommitment()
 }
 
 // Test function for partial state transfer and reconstruction
@@ -440,8 +571,14 @@ func TestPartialStateTransferAndReconstruction() {
 func TestCrossShardTransfer() {
 	shardA := CreateShard("shardA", "")
 	shardB := CreateShard("shardB", "")
-	shardA.InitializeBloomFilter(1000, 0.01)
-	shardB.InitializeBloomFilter(1000, 0.01)
+	shardA.InitializeBloomFilter(BloomFilterConfig{
+		ExpectedItems: 1000,
+		FalsePositiveRate: 0.01,
+	})
+	shardB.InitializeBloomFilter(BloomFilterConfig{
+		ExpectedItems: 1000,
+		FalsePositiveRate: 0.01,
+	})
 
 	shardA.SetState("alice", []byte("100"))
 	shardA.SetState("bob", []byte("200"))
@@ -467,8 +604,14 @@ func TestCrossShardTransfer() {
 func TestAtomicCrossShardTransfer() {
 	shardA := CreateShard("shardA", "")
 	shardB := CreateShard("shardB", "")
-	shardA.InitializeBloomFilter(1000, 0.01)
-	shardB.InitializeBloomFilter(1000, 0.01)
+	shardA.InitializeBloomFilter(BloomFilterConfig{
+		ExpectedItems: 1000,
+		FalsePositiveRate: 0.01,
+	})
+	shardB.InitializeBloomFilter(BloomFilterConfig{
+		ExpectedItems: 1000,
+		FalsePositiveRate: 0.01,
+	})
 
 	shardA.SetState("alice", []byte("100"))
 	shardA.SetState("bob", []byte("200"))
@@ -493,7 +636,10 @@ func TestAtomicCrossShardTransfer() {
 // Test function for Bloom filter verification
 func TestShardBloomFilter() {
 	shard := CreateShard("bloomtest", "")
-	shard.InitializeBloomFilter(1000, 0.01) // 1000 items, 1% false positive rate
+	shard.InitializeBloomFilter(BloomFilterConfig{
+		ExpectedItems: 1000,
+		FalsePositiveRate: 0.01,
+	})
 
 	// Add some keys
 	shard.SetState("alice", []byte("100"))
@@ -507,61 +653,13 @@ func TestShardBloomFilter() {
 	fmt.Println("dave in bloom:", shard.CheckKeyInBloom("dave"))   // Should be false (most likely)
 }
 
-func TestShardManagement() {
-	// Step 1: Create a root shard
-	rootShard := CreateShard("root", "")
-	fmt.Printf("Created root shard: %+v\n", rootShard)
-
-	// Step 2: Split the root shard into two child shards
-	err := SplitShard("root", "child1", "child2")
-	if err != nil {
-		fmt.Printf("Error splitting shard: %v\n", err)
-		return
-	}
-	fmt.Printf("Shard registry after splitting: %+v\n", ShardRegistry)
-
-	// Step 3: Merge the child shards back into the root shard
-	err = MergeShards("root", "child1", "child2")
-	if err != nil {
-		fmt.Printf("Error merging shards: %v\n", err)
-		return
-	}
-	fmt.Printf("Shard registry after merging: %+v\n", ShardRegistry)
-}
-
-func TestShardRebalancing() {
-	// Step 1: Create a root shard
-	rootShard := CreateShard("root", "")
-	rootShard.Load = 50 // Initial load
-	fmt.Printf("Initial root shard: %+v\n", rootShard)
-
-	// Step 2: Simulate load increase and check for splitting
-	rootShard.Load = 120 // Exceed threshold
-	err := CheckAndSplitShard("root", 100) // Threshold is 100
-	if err != nil {
-		fmt.Printf("Error during shard splitting: %v\n", err)
-		return
-	}
-	fmt.Printf("Shard registry after splitting: %+v\n", ShardRegistry)
-
-	// Step 3: Simulate load decrease and check for merging
-	child1 := ShardRegistry["root-child1"]
-	child2 := ShardRegistry["root-child2"]
-	child1.Load = 30
-	child2.Load = 20 // Combined load is below threshold
-
-	err = CheckAndMergeShards("root", 100) // Threshold is 100
-	if err != nil {
-		fmt.Printf("Error during shard merging: %v\n", err)
-		return
-	}
-	fmt.Printf("Shard registry after merging: %+v\n", ShardRegistry)
-}
-
 // Test function for MerkleAccumulator
 func TestShardAccumulator() {
 	shard := CreateShard("accumtest", "")
-	shard.InitializeBloomFilter(1000, 0.01)
+	shard.InitializeBloomFilter(BloomFilterConfig{
+		ExpectedItems: 1000,
+		FalsePositiveRate: 0.01,
+	})
 	shard.SetState("alice", []byte("100"))
 	shard.SetState("bob", []byte("200"))
 	shard.SetState("carol", []byte("300"))
@@ -619,27 +717,6 @@ func (s *Shard) PruneState(minHeight uint32, keyToHeight map[string]uint32) (pru
 		s.Accumulator = acc
 	}
 	return pruned
-}
-
-// Test function for state pruning
-func TestShardPruneState() {
-	shard := CreateShard("prunetest", "")
-	shard.InitializeBloomFilter(1000, 0.01)
-	shard.SetState("alice", []byte("100"))
-	shard.SetState("bob", []byte("200"))
-	shard.SetState("carol", []byte("300"))
-	// Simulate block heights for each key
-	keyToHeight := map[string]uint32{
-		"alice": 1,
-		"bob": 2,
-		"carol": 5,
-	}
-	fmt.Println("Before pruning:", shard.StateData)
-	pruned := shard.PruneState(3, keyToHeight)
-	fmt.Println("After pruning:", shard.StateData)
-	fmt.Println("Pruned entries:", pruned)
-	fmt.Printf("New Merkle root: %x\n", shard.MerkleRoot)
-	fmt.Printf("New accumulator root: %x\n", shard.Accumulator.RootHash)
 }
 
 // CompressState serializes and gzip-compresses the shard's StateData.

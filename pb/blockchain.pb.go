@@ -234,13 +234,204 @@ func (x *Block) GetShardRoots() [][]byte {
 	return nil
 }
 
-// A wrapper message to send different types of payloads over the network
+// Pedersen commitment for shard state
+type PedersenCommitment struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Commitment    []byte                 `protobuf:"bytes,1,opt,name=commitment,proto3" json:"commitment,omitempty"`
+	Blinding      []byte                 `protobuf:"bytes,2,opt,name=blinding,proto3" json:"blinding,omitempty"`
+	Value         []byte                 `protobuf:"bytes,3,opt,name=value,proto3" json:"value,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PedersenCommitment) Reset() {
+	*x = PedersenCommitment{}
+	mi := &file_pb_blockchain_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PedersenCommitment) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PedersenCommitment) ProtoMessage() {}
+
+func (x *PedersenCommitment) ProtoReflect() protoreflect.Message {
+	mi := &file_pb_blockchain_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PedersenCommitment.ProtoReflect.Descriptor instead.
+func (*PedersenCommitment) Descriptor() ([]byte, []int) {
+	return file_pb_blockchain_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *PedersenCommitment) GetCommitment() []byte {
+	if x != nil {
+		return x.Commitment
+	}
+	return nil
+}
+
+func (x *PedersenCommitment) GetBlinding() []byte {
+	if x != nil {
+		return x.Blinding
+	}
+	return nil
+}
+
+func (x *PedersenCommitment) GetValue() []byte {
+	if x != nil {
+		return x.Value
+	}
+	return nil
+}
+
+// Merkle proof for shard or state inclusion
+type MerkleProof struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	LeafHash      []byte                 `protobuf:"bytes,1,opt,name=leaf_hash,json=leafHash,proto3" json:"leaf_hash,omitempty"`
+	Siblings      [][]byte               `protobuf:"bytes,2,rep,name=siblings,proto3" json:"siblings,omitempty"`
+	PathBitmap    uint64                 `protobuf:"varint,3,opt,name=path_bitmap,json=pathBitmap,proto3" json:"path_bitmap,omitempty"`
+	Depth         uint32                 `protobuf:"varint,4,opt,name=depth,proto3" json:"depth,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MerkleProof) Reset() {
+	*x = MerkleProof{}
+	mi := &file_pb_blockchain_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MerkleProof) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MerkleProof) ProtoMessage() {}
+
+func (x *MerkleProof) ProtoReflect() protoreflect.Message {
+	mi := &file_pb_blockchain_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MerkleProof.ProtoReflect.Descriptor instead.
+func (*MerkleProof) Descriptor() ([]byte, []int) {
+	return file_pb_blockchain_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *MerkleProof) GetLeafHash() []byte {
+	if x != nil {
+		return x.LeafHash
+	}
+	return nil
+}
+
+func (x *MerkleProof) GetSiblings() [][]byte {
+	if x != nil {
+		return x.Siblings
+	}
+	return nil
+}
+
+func (x *MerkleProof) GetPathBitmap() uint64 {
+	if x != nil {
+		return x.PathBitmap
+	}
+	return 0
+}
+
+func (x *MerkleProof) GetDepth() uint32 {
+	if x != nil {
+		return x.Depth
+	}
+	return 0
+}
+
+// Commitment/proof exchange message
+type CommitmentProofMessage struct {
+	state              protoimpl.MessageState `protogen:"open.v1"`
+	ShardId            string                 `protobuf:"bytes,1,opt,name=shard_id,json=shardId,proto3" json:"shard_id,omitempty"`
+	PedersenCommitment *PedersenCommitment    `protobuf:"bytes,2,opt,name=pedersen_commitment,json=pedersenCommitment,proto3" json:"pedersen_commitment,omitempty"`
+	MerkleProof        *MerkleProof           `protobuf:"bytes,3,opt,name=merkle_proof,json=merkleProof,proto3" json:"merkle_proof,omitempty"` // Add more fields for cross-shard or accumulator proofs if needed
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
+}
+
+func (x *CommitmentProofMessage) Reset() {
+	*x = CommitmentProofMessage{}
+	mi := &file_pb_blockchain_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CommitmentProofMessage) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CommitmentProofMessage) ProtoMessage() {}
+
+func (x *CommitmentProofMessage) ProtoReflect() protoreflect.Message {
+	mi := &file_pb_blockchain_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CommitmentProofMessage.ProtoReflect.Descriptor instead.
+func (*CommitmentProofMessage) Descriptor() ([]byte, []int) {
+	return file_pb_blockchain_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *CommitmentProofMessage) GetShardId() string {
+	if x != nil {
+		return x.ShardId
+	}
+	return ""
+}
+
+func (x *CommitmentProofMessage) GetPedersenCommitment() *PedersenCommitment {
+	if x != nil {
+		return x.PedersenCommitment
+	}
+	return nil
+}
+
+func (x *CommitmentProofMessage) GetMerkleProof() *MerkleProof {
+	if x != nil {
+		return x.MerkleProof
+	}
+	return nil
+}
+
 type Message struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Types that are valid to be assigned to Payload:
 	//
 	//	*Message_Block
 	//	*Message_Transaction
+	//	*Message_CommitmentProof
 	Payload       isMessage_Payload `protobuf_oneof:"payload"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -248,7 +439,7 @@ type Message struct {
 
 func (x *Message) Reset() {
 	*x = Message{}
-	mi := &file_pb_blockchain_proto_msgTypes[3]
+	mi := &file_pb_blockchain_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -260,7 +451,7 @@ func (x *Message) String() string {
 func (*Message) ProtoMessage() {}
 
 func (x *Message) ProtoReflect() protoreflect.Message {
-	mi := &file_pb_blockchain_proto_msgTypes[3]
+	mi := &file_pb_blockchain_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -273,7 +464,7 @@ func (x *Message) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Message.ProtoReflect.Descriptor instead.
 func (*Message) Descriptor() ([]byte, []int) {
-	return file_pb_blockchain_proto_rawDescGZIP(), []int{3}
+	return file_pb_blockchain_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *Message) GetPayload() isMessage_Payload {
@@ -301,6 +492,15 @@ func (x *Message) GetTransaction() *Transaction {
 	return nil
 }
 
+func (x *Message) GetCommitmentProof() *CommitmentProofMessage {
+	if x != nil {
+		if x, ok := x.Payload.(*Message_CommitmentProof); ok {
+			return x.CommitmentProof
+		}
+	}
+	return nil
+}
+
 type isMessage_Payload interface {
 	isMessage_Payload()
 }
@@ -313,9 +513,15 @@ type Message_Transaction struct {
 	Transaction *Transaction `protobuf:"bytes,2,opt,name=transaction,proto3,oneof"`
 }
 
+type Message_CommitmentProof struct {
+	CommitmentProof *CommitmentProofMessage `protobuf:"bytes,3,opt,name=commitment_proof,json=commitmentProof,proto3,oneof"`
+}
+
 func (*Message_Block) isMessage_Payload() {}
 
 func (*Message_Transaction) isMessage_Payload() {}
+
+func (*Message_CommitmentProof) isMessage_Payload() {}
 
 var File_pb_blockchain_proto protoreflect.FileDescriptor
 
@@ -339,10 +545,27 @@ const file_pb_blockchain_proto_rawDesc = "" +
 	"\x06header\x18\x01 \x01(\v2\x0f.pb.BlockHeaderR\x06header\x123\n" +
 	"\ftransactions\x18\x02 \x03(\v2\x0f.pb.TransactionR\ftransactions\x12\x1f\n" +
 	"\vshard_roots\x18\x03 \x03(\fR\n" +
-	"shardRoots\"l\n" +
+	"shardRoots\"f\n" +
+	"\x12PedersenCommitment\x12\x1e\n" +
+	"\n" +
+	"commitment\x18\x01 \x01(\fR\n" +
+	"commitment\x12\x1a\n" +
+	"\bblinding\x18\x02 \x01(\fR\bblinding\x12\x14\n" +
+	"\x05value\x18\x03 \x01(\fR\x05value\"}\n" +
+	"\vMerkleProof\x12\x1b\n" +
+	"\tleaf_hash\x18\x01 \x01(\fR\bleafHash\x12\x1a\n" +
+	"\bsiblings\x18\x02 \x03(\fR\bsiblings\x12\x1f\n" +
+	"\vpath_bitmap\x18\x03 \x01(\x04R\n" +
+	"pathBitmap\x12\x14\n" +
+	"\x05depth\x18\x04 \x01(\rR\x05depth\"\xb0\x01\n" +
+	"\x16CommitmentProofMessage\x12\x19\n" +
+	"\bshard_id\x18\x01 \x01(\tR\ashardId\x12G\n" +
+	"\x13pedersen_commitment\x18\x02 \x01(\v2\x16.pb.PedersenCommitmentR\x12pedersenCommitment\x122\n" +
+	"\fmerkle_proof\x18\x03 \x01(\v2\x0f.pb.MerkleProofR\vmerkleProof\"\xb5\x01\n" +
 	"\aMessage\x12!\n" +
 	"\x05block\x18\x01 \x01(\v2\t.pb.BlockH\x00R\x05block\x123\n" +
-	"\vtransaction\x18\x02 \x01(\v2\x0f.pb.TransactionH\x00R\vtransactionB\t\n" +
+	"\vtransaction\x18\x02 \x01(\v2\x0f.pb.TransactionH\x00R\vtransaction\x12G\n" +
+	"\x10commitment_proof\x18\x03 \x01(\v2\x1a.pb.CommitmentProofMessageH\x00R\x0fcommitmentProofB\t\n" +
 	"\apayloadB\x12Z\x10go-blockchain/pbb\x06proto3"
 
 var (
@@ -357,23 +580,29 @@ func file_pb_blockchain_proto_rawDescGZIP() []byte {
 	return file_pb_blockchain_proto_rawDescData
 }
 
-var file_pb_blockchain_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_pb_blockchain_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
 var file_pb_blockchain_proto_goTypes = []any{
-	(*Transaction)(nil), // 0: pb.Transaction
-	(*BlockHeader)(nil), // 1: pb.BlockHeader
-	(*Block)(nil),       // 2: pb.Block
-	(*Message)(nil),     // 3: pb.Message
+	(*Transaction)(nil),            // 0: pb.Transaction
+	(*BlockHeader)(nil),            // 1: pb.BlockHeader
+	(*Block)(nil),                  // 2: pb.Block
+	(*PedersenCommitment)(nil),     // 3: pb.PedersenCommitment
+	(*MerkleProof)(nil),            // 4: pb.MerkleProof
+	(*CommitmentProofMessage)(nil), // 5: pb.CommitmentProofMessage
+	(*Message)(nil),                // 6: pb.Message
 }
 var file_pb_blockchain_proto_depIdxs = []int32{
 	1, // 0: pb.Block.header:type_name -> pb.BlockHeader
 	0, // 1: pb.Block.transactions:type_name -> pb.Transaction
-	2, // 2: pb.Message.block:type_name -> pb.Block
-	0, // 3: pb.Message.transaction:type_name -> pb.Transaction
-	4, // [4:4] is the sub-list for method output_type
-	4, // [4:4] is the sub-list for method input_type
-	4, // [4:4] is the sub-list for extension type_name
-	4, // [4:4] is the sub-list for extension extendee
-	0, // [0:4] is the sub-list for field type_name
+	3, // 2: pb.CommitmentProofMessage.pedersen_commitment:type_name -> pb.PedersenCommitment
+	4, // 3: pb.CommitmentProofMessage.merkle_proof:type_name -> pb.MerkleProof
+	2, // 4: pb.Message.block:type_name -> pb.Block
+	0, // 5: pb.Message.transaction:type_name -> pb.Transaction
+	5, // 6: pb.Message.commitment_proof:type_name -> pb.CommitmentProofMessage
+	7, // [7:7] is the sub-list for method output_type
+	7, // [7:7] is the sub-list for method input_type
+	7, // [7:7] is the sub-list for extension type_name
+	7, // [7:7] is the sub-list for extension extendee
+	0, // [0:7] is the sub-list for field type_name
 }
 
 func init() { file_pb_blockchain_proto_init() }
@@ -381,9 +610,10 @@ func file_pb_blockchain_proto_init() {
 	if File_pb_blockchain_proto != nil {
 		return
 	}
-	file_pb_blockchain_proto_msgTypes[3].OneofWrappers = []any{
+	file_pb_blockchain_proto_msgTypes[6].OneofWrappers = []any{
 		(*Message_Block)(nil),
 		(*Message_Transaction)(nil),
+		(*Message_CommitmentProof)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -391,7 +621,7 @@ func file_pb_blockchain_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_pb_blockchain_proto_rawDesc), len(file_pb_blockchain_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   4,
+			NumMessages:   7,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

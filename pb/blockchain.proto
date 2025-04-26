@@ -40,11 +40,64 @@ message Block {
   // as it's derived from the header.
 }
 
-// A wrapper message to send different types of payloads over the network
+// Pedersen commitment for shard state
+message PedersenCommitment {
+  bytes commitment = 1;
+  bytes blinding = 2;
+  bytes value = 3;
+}
+
+// Merkle proof for shard or state inclusion
+message MerkleProof {
+  bytes leaf_hash = 1;
+  repeated bytes siblings = 2;
+  uint64 path_bitmap = 3;
+  uint32 depth = 4;
+}
+
+// MPCShareProof represents a proof for share verification
+message MPCShareProof {
+  bytes proof_data = 1;
+  repeated bytes commitments = 2;
+  bytes challenge = 3;
+  bytes response = 4;
+}
+
+// MPCShareDistribution represents share distribution status
+message MPCShareDistribution {
+  string distribution_id = 1;
+  int32 total_shares = 2;
+  int32 distributed_shares = 3;
+  repeated string participants = 4;
+  int64 start_time = 5;
+  repeated MPCVerificationStatus verifications = 6;
+}
+
+// MPCVerificationStatus represents verification status for a share
+message MPCVerificationStatus {
+  string share_id = 1;
+  string participant_id = 2;
+  bool verified = 3;
+  int64 verification_time = 4;
+  repeated string errors = 5;
+}
+
+// Commitment/proof exchange message
+message CommitmentProofMessage {
+  string shard_id = 1;
+  PedersenCommitment pedersen_commitment = 2;
+  MerkleProof merkle_proof = 3;
+  // Add more fields for cross-shard or accumulator proofs if needed
+  MPCShareProof share_proof = 4;
+  string distribution_id = 5;
+  int32 share_index = 6;
+}
+
 message Message {
     oneof payload {
         Block block = 1;
         Transaction transaction = 2;
+        CommitmentProofMessage commitment_proof = 3;
         // Add other message types later, e.g.:
         // GetBlocksRequest get_blocks_request = 3;
         // GetBlocksResponse get_blocks_response = 4;
