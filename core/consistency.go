@@ -1,7 +1,7 @@
 package core
 
 import (
-	"fmt"
+	"log"
 	"math"
 	"sync"
 	"time"
@@ -48,27 +48,42 @@ func NewConsistencyOrchestrator() *ConsistencyOrchestrator {
 	}
 }
 
+// GetNetworkStats returns network statistics for a node
+func (co *ConsistencyOrchestrator) GetNetworkStats(nodeID string) *NetworkStats {
+	co.mu.RLock()
+	defer co.mu.RUnlock()
+	return co.networkStats[nodeID]
+}
+
 // UpdateNetworkStats updates network statistics for a node
 func (co *ConsistencyOrchestrator) UpdateNetworkStats(nodeID string, latency float64, packetLoss float64) {
 	co.mu.Lock()
 	defer co.mu.Unlock()
 
+	if co.networkStats == nil {
+		co.networkStats = make(map[string]*NetworkStats)
+	}
+
 	stats, exists := co.networkStats[nodeID]
 	if !exists {
+		log.Printf("Creating new network stats for node %s", nodeID)
 		stats = &NetworkStats{}
 		co.networkStats[nodeID] = stats
 	}
 
-	// Exponential moving average for latency
+	// Update with exponential moving average
 	alpha := 0.2 // Smoothing factor
-	stats.AvgLatency = alpha*latency + (1-alpha)*stats.AvgLatency
-	stats.PacketLoss = packetLoss
+	stats.AvgLatency = (alpha * latency) + ((1 - alpha) * stats.AvgLatency)
+	stats.PacketLoss = (alpha * packetLoss) + ((1 - alpha) * stats.PacketLoss)
+	
+	// Calculate partition probability based on latency and packet loss
+	stats.PartitionProb = math.Min(1.0, (stats.PacketLoss*0.7 + (stats.AvgLatency/1000.0)*0.3))
 	stats.LastUpdated = time.Now()
 
-	// Calculate partition probability based on packet loss and latency
-	latencyFactor := math.Min(1.0, stats.AvgLatency/1000.0) // Normalized to [0,1]
-	stats.PartitionProb = (latencyFactor + stats.PacketLoss) / 2.0
+	// log.Printf("Updated stats for node %s: latency=%.2fms, packetLoss=%.2f%%, partitionProb=%.2f%%", 
+    //           nodeID, stats.AvgLatency, stats.PacketLoss*100, stats.PartitionProb*100)
 
+	// Adjust consistency mechanisms based on new stats
 	co.adjustConsistencyLevel()
 	co.adjustTimeoutAndRetry()
 }
@@ -85,6 +100,7 @@ func (co *ConsistencyOrchestrator) adjustConsistencyLevel() {
 
 	if count > 0 {
 		avgPartitionProb /= float64(count)
+		oldLevel := co.currentLevel
 
 		// Adjust consistency level based on partition probability
 		switch {
@@ -95,40 +111,48 @@ func (co *ConsistencyOrchestrator) adjustConsistencyLevel() {
 		default:
 			co.currentLevel = EventualConsistency
 		}
+
+		if oldLevel != co.currentLevel {
+			log.Printf("Consistency level changed from %v to %v (avgPartitionProb=%.2f%%)", 
+                      oldLevel, co.currentLevel, avgPartitionProb*100)
+		}
 	}
 }
 
 // adjustTimeoutAndRetry adjusts timeout and retry parameters based on network conditions
 func (co *ConsistencyOrchestrator) adjustTimeoutAndRetry() {
 	var maxLatency float64
+	var avgPacketLoss float64
+	nodeCount := 0
 
 	for _, stats := range co.networkStats {
 		if stats.AvgLatency > maxLatency {
 			maxLatency = stats.AvgLatency
 		}
+		avgPacketLoss += stats.PacketLoss
+		nodeCount++
 	}
 
-	// Set timeout to 3x the maximum observed latency
+	if nodeCount > 0 {
+		avgPacketLoss /= float64(nodeCount)
+	}
+
+	// Set timeout to 3x the maximum observed latency, with minimum of 1 second
 	co.timeoutMS = int64(math.Max(1000, 3*maxLatency))
 
 	// Adjust retry attempts based on packet loss
-	var avgPacketLoss float64
-	count := 0
-	for _, stats := range co.networkStats {
-		avgPacketLoss += stats.PacketLoss
-		count++
-	}
-	if count > 0 {
-		avgPacketLoss /= float64(count)
-		// More retries when packet loss is high
-		co.retryAttempts = int(math.Max(3, math.Min(10, 3/math.Max(0.1, 1-avgPacketLoss))))
-	}
+	// More retries when packet loss is high, but cap at reasonable maximum
+	co.retryAttempts = int(math.Max(3, math.Min(10, 3/math.Max(0.1, 1-avgPacketLoss))))
 }
 
 // UpdateVectorClock updates the vector clock for a node
 func (co *ConsistencyOrchestrator) UpdateVectorClock(nodeID string) {
 	co.mu.Lock()
 	defer co.mu.Unlock()
+
+	if co.vectorClocks == nil {
+		co.vectorClocks = make(map[string]VectorClock)
+	}
 
 	clock, exists := co.vectorClocks[nodeID]
 	if !exists {
@@ -192,63 +216,96 @@ func (co *ConsistencyOrchestrator) Compare(clock1, clock2 VectorClock) int {
 	return 0 // Concurrent events
 }
 
-// GetConsistencyLevel returns the current consistency level
-func (co *ConsistencyOrchestrator) GetConsistencyLevel() ConsistencyLevel {
+// VerifyConsistency checks if an operation meets the current consistency requirements
+func (co *ConsistencyOrchestrator) VerifyConsistency(nodeID string, operation string) bool {
+	_ = operation
 	co.mu.RLock()
 	defer co.mu.RUnlock()
-	return co.currentLevel
+
+	result := false
+	switch co.currentLevel {
+	case StrongConsistency:
+		result = co.verifyStrongConsistency(nodeID, operation)
+		log.Printf("Strong consistency verification for node %s: %v", nodeID, result)
+	case CausalConsistency:
+		result = co.verifyCausalConsistency(nodeID, operation)
+		log.Printf("Causal consistency verification for node %s: %v", nodeID, result)
+	case EventualConsistency:
+		result = true
+		log.Printf("Eventual consistency assumed for node %s", nodeID)
+	default:
+		log.Printf("Unknown consistency level for node %s", nodeID)
+		return false
+	}
+	return result
 }
 
-// GetTimeout returns the current timeout value in milliseconds
-func (co *ConsistencyOrchestrator) GetTimeout() int64 {
+// verifyStrongConsistency implements strong consistency verification
+func (co *ConsistencyOrchestrator) verifyStrongConsistency(nodeID string, operation string) bool {
+	_ = operation
+	// For strong consistency, we need majority acknowledgment
+	totalNodes := len(co.networkStats)
+	if totalNodes == 0 {
+		return false
+	}
+
+	requiredNodes := (totalNodes / 2) + 1
+	verifiedNodes := 0
+
+	// In a real implementation, this would make network calls
+	// For now, we simulate based on network conditions
+	for peerID, stats := range co.networkStats {
+		if peerID == nodeID {
+			verifiedNodes++ // Count self
+			continue
+		}
+
+		// Simulate verification based on network conditions
+		if stats.PartitionProb < 0.5 && stats.PacketLoss < 0.3 {
+			verifiedNodes++
+		}
+
+		if verifiedNodes >= requiredNodes {
+			return true
+		}
+	}
+
+	return false
+}
+
+// verifyCausalConsistency verifies causal consistency using vector clocks
+func (co *ConsistencyOrchestrator) verifyCausalConsistency(nodeID string, operation string) bool {
+	_ = operation
+	clock, exists := co.vectorClocks[nodeID]
+	if !exists {
+		return false
+	}
+
+	// Verify that we have all causal dependencies
+	for peer, count := range clock {
+		if peer == nodeID {
+			continue
+		}
+
+		peerClock, exists := co.vectorClocks[peer]
+		if !exists || peerClock[peer] < count-1 {
+			return false
+		}
+	}
+
+	return true
+}
+
+// GetClockForNode returns the vector clock for a specific node
+func (co *ConsistencyOrchestrator) GetClockForNode(nodeID string) VectorClock {
 	co.mu.RLock()
 	defer co.mu.RUnlock()
-	return co.timeoutMS
-}
-
-// GetRetryAttempts returns the current number of retry attempts
-func (co *ConsistencyOrchestrator) GetRetryAttempts() int {
-	co.mu.RLock()
-	defer co.mu.RUnlock()
-	return co.retryAttempts
-}
-
-// TestCAP simulates different network conditions and tests adaptive consistency
-func TestCAP() {
-	// Initialize components
-	orchestrator := NewConsistencyOrchestrator()
-	resolver := NewConflictResolver(orchestrator)
-
-	// Simulate good network conditions
-	orchestrator.UpdateNetworkStats("node1", 50.0, 0.01)  // 50ms latency, 1% packet loss
-	orchestrator.UpdateNetworkStats("node2", 60.0, 0.02)  // 60ms latency, 2% packet loss
-	fmt.Printf("Good network conditions - Consistency Level: %v\n", orchestrator.GetConsistencyLevel())
-
-	// Simulate degraded network
-	orchestrator.UpdateNetworkStats("node1", 200.0, 0.15) // 200ms latency, 15% packet loss
-	orchestrator.UpdateNetworkStats("node2", 250.0, 0.20) // 250ms latency, 20% packet loss
-	fmt.Printf("Degraded network - Consistency Level: %v\n", orchestrator.GetConsistencyLevel())
-	fmt.Printf("Adjusted timeout: %dms, Retries: %d\n", orchestrator.GetTimeout(), orchestrator.GetRetryAttempts())
-
-	// Simulate conflict detection and resolution
-	values := [][]byte{
-		[]byte("value1"),
-		[]byte("value2"),
-		[]byte("value1"), // Duplicate to affect entropy
+	if clock, exists := co.vectorClocks[nodeID]; exists {
+		clockCopy := make(VectorClock)
+		for k, v := range clock {
+			clockCopy[k] = v
+		}
+		return clockCopy
 	}
-	clocks := []VectorClock{
-		{"node1": 1, "node2": 0},
-		{"node1": 0, "node2": 1},
-		{"node1": 1, "node2": 1},
-	}
-
-	conflict := resolver.DetectConflict("testKey", values, clocks)
-	if conflict != nil {
-		fmt.Printf("Conflict detected - Entropy Score: %.2f, Resolution Probability: %.2f\n", 
-			conflict.EntropyScore, conflict.ResolutionProb)
-		
-		resolvedValue, resolvedClock := resolver.ResolveConflict(conflict)
-		fmt.Printf("Resolved Value: %s\n", string(resolvedValue))
-		fmt.Printf("Final Vector Clock: %v\n", resolvedClock)
-	}
+	return make(VectorClock)
 }

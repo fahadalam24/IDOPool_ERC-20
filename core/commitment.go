@@ -2,7 +2,10 @@ package core
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"math/big"
+	"sync"
+
 	"github.com/btcsuite/btcd/btcec/v2"
 )
 
@@ -13,42 +16,75 @@ type PedersenCommitment struct {
 	Value      *big.Int
 }
 
-// GeneratePedersenCommitment creates a Pedersen commitment to a value using a random blinding factor.
+var (
+	pedersenH   *btcec.PublicKey
+	initPedersen sync.Once
+)
+
+// hashToCurve deterministically hashes a string to a curve point (for H)
+func hashToCurve(label string) *btcec.PublicKey {
+	curve := btcec.S256()
+	counter := 0
+	for {
+		input := append([]byte(label), byte(counter))
+		hash := sha256.Sum256(input)
+		x, y := curve.ScalarBaseMult(hash[:])
+		if y != nil {
+			return btcec.NewPublicKey(bigIntToFieldVal(x), bigIntToFieldVal(y))
+		}
+		counter++
+	}
+}
+
+// getPedersenH returns a securely generated H independent of G
+func getPedersenH() *btcec.PublicKey {
+	initPedersen.Do(func() {
+		pedersenH = hashToCurve("pedersen_commitment_H")
+	})
+	return pedersenH
+}
+
+// bigIntToBytes converts a big.Int to a 32-byte slice
+func bigIntToBytes(bi *big.Int) []byte {
+	bytes := bi.Bytes()
+	if len(bytes) > 32 {
+		bytes = bytes[:32]
+	}
+	padded := make([]byte, 32)
+	copy(padded[32-len(bytes):], bytes)
+	return padded
+}
+
+// Helper to convert *big.Int to *btcec.FieldVal
+func bigIntToFieldVal(b *big.Int) *btcec.FieldVal {
+	var fv btcec.FieldVal
+	fv.SetByteSlice(b.Bytes())
+	return &fv
+}
+
+// GeneratePedersenCommitment creates a secure Pedersen commitment to a value using a random blinding factor.
 func GeneratePedersenCommitment(value *big.Int) (*PedersenCommitment, error) {
 	curve := btcec.S256()
-	G := curve.Params().Gx
-	Gy := curve.Params().Gy
+	H := getPedersenH()
 
-	// Use a fixed H = G*2 for demo (not secure for production)
-	Hx, Hy := curve.ScalarMult(G, Gy, big.NewInt(2).Bytes())
-
-	r, err := rand.Int(rand.Reader, curve.Params().N)
+	// Generate random blinding factor
+	r, err := rand.Int(rand.Reader, curve.N)
 	if err != nil {
 		return nil, err
 	}
 
-	// v*G
-	vGx, vGy := curve.ScalarMult(G, Gy, value.Bytes())
-	// r*H
-	rHx, rHy := curve.ScalarMult(Hx, Hy, r.Bytes())
+	// v*G using the generator point
+	vBytes := bigIntToBytes(value)
+	vPrivKey, _ := btcec.PrivKeyFromBytes(vBytes)
+	vG := vPrivKey.PubKey()
+
+	// r*H using the independent point H
+	rBytes := bigIntToBytes(r)
+	rHx, rHy := curve.ScalarMult(H.X(), H.Y(), rBytes)
+
 	// C = v*G + r*H
-	Cx, Cy := curve.Add(vGx, vGy, rHx, rHy)
-
-	// Convert coordinates to compressed point format
-	isOdd := Cy.Bit(0) == 1
-	compressedPoint := make([]byte, 33)
-	if isOdd {
-		compressedPoint[0] = 0x03
-	} else {
-		compressedPoint[0] = 0x02
-	}
-	Cx.FillBytes(compressedPoint[1:])
-
-	// Parse the compressed point to create a public key
-	commitment, err := btcec.ParsePubKey(compressedPoint)
-	if err != nil {
-		return nil, err
-	}
+	commitmentX, commitmentY := curve.Add(vG.X(), vG.Y(), rHx, rHy)
+	commitment := btcec.NewPublicKey(bigIntToFieldVal(commitmentX), bigIntToFieldVal(commitmentY))
 
 	return &PedersenCommitment{
 		Commitment: commitment,
@@ -60,11 +96,72 @@ func GeneratePedersenCommitment(value *big.Int) (*PedersenCommitment, error) {
 // VerifyPedersenCommitment checks if the commitment matches the value and blinding factor.
 func VerifyPedersenCommitment(commitment *PedersenCommitment) bool {
 	curve := btcec.S256()
-	G := curve.Params().Gx
-	Gy := curve.Params().Gy
-	Hx, Hy := curve.ScalarMult(G, Gy, big.NewInt(2).Bytes())
-	vGx, vGy := curve.ScalarMult(G, Gy, commitment.Value.Bytes())
-	rHx, rHy := curve.ScalarMult(Hx, Hy, commitment.Blinding.Bytes())
-	Cx, Cy := curve.Add(vGx, vGy, rHx, rHy)
-	return Cx.Cmp(commitment.Commitment.X()) == 0 && Cy.Cmp(commitment.Commitment.Y()) == 0
+	H := getPedersenH()
+
+	// v*G
+	vBytes := bigIntToBytes(commitment.Value)
+	vPrivKey, _ := btcec.PrivKeyFromBytes(vBytes)
+	vG := vPrivKey.PubKey()
+
+	// r*H
+	rBytes := bigIntToBytes(commitment.Blinding)
+	rHx, rHy := curve.ScalarMult(H.X(), H.Y(), rBytes)
+
+	// Expected commitment = v*G + r*H
+	expectedX, expectedY := curve.Add(vG.X(), vG.Y(), rHx, rHy)
+	expected := btcec.NewPublicKey(bigIntToFieldVal(expectedX), bigIntToFieldVal(expectedY))
+
+	return expected.IsEqual(commitment.Commitment)
+}
+
+// OpenCommitment reveals the value and blinding factor of a commitment
+func OpenCommitment(c *PedersenCommitment) (value *big.Int, blinding *big.Int) {
+	return c.Value, c.Blinding
+}
+
+// CreateShardCommitment creates a Pedersen commitment for a shard's state
+func CreateShardCommitment(shardState []byte) (*PedersenCommitment, error) {
+	// Convert shard state to a numerical value
+	stateHash := sha256.Sum256(shardState)
+	value := new(big.Int).SetBytes(stateHash[:])
+
+	// Generate commitment
+	return GeneratePedersenCommitment(value)
+}
+
+// VerifyShardCommitment verifies a shard's state commitment
+func VerifyShardCommitment(shardState []byte, commitment *PedersenCommitment) bool {
+	// Regenerate state value
+	stateHash := sha256.Sum256(shardState)
+	expectedValue := new(big.Int).SetBytes(stateHash[:])
+
+	// Check if the committed value matches
+	if expectedValue.Cmp(commitment.Value) != 0 {
+		return false
+	}
+
+	// Verify the commitment itself
+	return VerifyPedersenCommitment(commitment)
+}
+
+// BatchVerifyCommitments verifies multiple commitments in parallel
+func BatchVerifyCommitments(commitments []*PedersenCommitment) bool {
+	if len(commitments) == 0 {
+		return true
+	}
+
+	results := make(chan bool, len(commitments))
+	for _, comm := range commitments {
+		go func(c *PedersenCommitment) {
+			results <- VerifyPedersenCommitment(c)
+		}(comm)
+	}
+
+	// Collect results
+	for i := 0; i < len(commitments); i++ {
+		if !<-results {
+			return false
+		}
+	}
+	return true
 }

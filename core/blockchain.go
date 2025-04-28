@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"fmt"
 	"github.com/dgraph-io/badger/v4"
 	"google.golang.org/protobuf/proto"
@@ -10,19 +11,20 @@ import (
 
 // Blockchain represents the blockchain with a persistent database.
 type Blockchain struct {
-	db      *badger.DB
-	tipHash []byte // Hash of the latest block
+	db        *badger.DB
+	tipHash   []byte // Hash of the latest block
+	consensus *ConsensusEngine // Consensus engine for block finalization
 }
 
 // NewBlockchain initializes a new blockchain with persistence.
-func NewBlockchain(genesisTx *Transaction, dbPath string) (*Blockchain, error) {
+func NewBlockchain(genesisTx *Transaction, dbPath string, consensus *ConsensusEngine) (*Blockchain, error) {
 	// Open the BadgerDB database
 	db, err := badger.Open(badger.DefaultOptions(dbPath))
 	if err != nil {
 		return nil, err
 	}
 
-	bc := &Blockchain{db: db}
+	bc := &Blockchain{db: db, consensus: consensus}
 
 	// Check if the database is empty
 	err = db.View(func(txn *badger.Txn) error {
@@ -64,34 +66,57 @@ func NewBlockchain(genesisTx *Transaction, dbPath string) (*Blockchain, error) {
 
 // storeBlock saves a block to the database.
 func (bc *Blockchain) storeBlock(block *Block) error {
+	if bc == nil {
+		return fmt.Errorf("storeBlock: Blockchain instance is nil")
+	}
+	if bc.db == nil {
+		return fmt.Errorf("storeBlock: database is nil")
+	}
+	if block == nil {
+		return fmt.Errorf("storeBlock: block is nil")
+	}
+	if block.Header == nil {
+		return fmt.Errorf("storeBlock: block.Header is nil")
+	}
+	blockHash, err := block.Hash()
+	if err != nil {
+		log.Printf("storeBlock: failed to calculate block hash: %v", err)
+		return err
+	}
+
+	blockProto, err := block.ToProto()
+	if err != nil {
+		log.Printf("storeBlock: failed to convert block to proto: %v", err)
+		return err
+	}
+
+	blockBytes, err := proto.Marshal(blockProto)
+	if err != nil {
+		log.Printf("storeBlock: failed to marshal block proto: %v", err)
+		return err
+	}
+
 	return bc.db.Update(func(txn *badger.Txn) error {
-		blockHash, err := block.Hash()
-		if err != nil {
-			return err
+		if blockHash == nil {
+			log.Println("storeBlock: blockHash is nil inside transaction")
+			return fmt.Errorf("blockHash is nil")
 		}
-
-		blockProto, err := block.ToProto()
-		if err != nil {
-			return err
+		if blockBytes == nil {
+			log.Println("storeBlock: blockBytes is nil inside transaction")
+			return fmt.Errorf("blockBytes is nil")
 		}
-
-		blockBytes, err := proto.Marshal(blockProto)
-		if err != nil {
-			return err
-		}
-
 		// Store the block by its hash
 		err = txn.Set(blockHash, blockBytes)
 		if err != nil {
+			log.Printf("storeBlock: failed to set block in DB: %v", err)
 			return err
 		}
-
 		// Update the last hash
 		err = txn.Set([]byte("lh"), blockHash)
 		if err != nil {
+			log.Printf("storeBlock: failed to set last hash in DB: %v", err)
 			return err
 		}
-
 		bc.tipHash = blockHash
 		return nil
 	})
@@ -137,9 +162,17 @@ func (bc *Blockchain) AddBlock(transactions []*Transaction) (*Block, error) {
 		return nil, fmt.Errorf("block validation failed: %w", err)
 	}
 
-	err = bc.storeBlock(newBlock)
-	if err != nil {
-		return nil, err
+	// Require consensus before storing the block
+	if bc.consensus != nil {
+		ctx := context.Background()
+		if err := bc.consensus.StartConsensus(ctx, newBlock); err != nil {
+			return nil, fmt.Errorf("consensus failed: %w", err)
+		}
+	} else {
+		// Fallback: store block directly if no consensus engine (should not happen in production)
+		if err = bc.storeBlock(newBlock); err != nil {
+			return nil, err
+		}
 	}
 
 	return newBlock, nil

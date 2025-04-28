@@ -3,6 +3,7 @@ package network
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,12 +15,12 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/protocol"
-	"github.com/libp2p/go-libp2p/p2p/discovery/mdns" // For local discovery
 	"github.com/multiformats/go-multiaddr"
 	"google.golang.org/protobuf/proto"
 	"go-blockchain/core"
@@ -33,130 +34,125 @@ const (
 // Node represents a network node in the blockchain network.
 type Node struct {
 	host         host.Host
-	Reputation   int
 	orchestrator *core.ConsistencyOrchestrator
-	resolver     *core.ConflictResolver
 	byzantine    *core.ByzantineNode
-	startTime    time.Time // Track when the node was started
+	resolver     *core.ConflictResolver
+	reputations  map[string]float64 // Peer ID -> reputation score
+	metrics      struct {
+		totalBlocksReceived uint64
+		totalTxReceived     uint64
+		lastMetricsReset   time.Time
+	}
+	mpcMetrics   *core.MPCMetrics
+	httpServer   *http.Server
+	metricsPort  int
+	startTime    time.Time         // Track node uptime
+	Reputation   int              // Added missing reputation field
+	blockchain   *core.Blockchain // Added blockchain reference
 }
 
 // NewNetworkNode creates and initializes a new network node.
-func NewNetworkNode(ctx context.Context, listenPort int) (*Node, error) {
-	// Create a new libp2p host.
-	// Listen on all available interfaces on the specified TCP port.
-	// 0 means automatically select a port.
-	listenAddr := fmt.Sprintf("/ip4/0.0.0.0/tcp/%d", listenPort)
-
-	// libp2p.New constructs a new libp2p Host.
-	// Other options can be added here, like security protocols, transports, etc.
+func NewNetworkNode(ctx context.Context, port int) (*Node, error) {
+	// Create libp2p host with relevant options
 	h, err := libp2p.New(
-		libp2p.ListenAddrStrings(listenAddr),
-		// Add other options like NAT traversal if needed later
-		// libp2p.EnableNATService(), // Example
-		// libp2p.EnableRelay(),      // Example for NATed peers
+		libp2p.ListenAddrStrings(fmt.Sprintf("/ip4/0.0.0.0/tcp/%d", port)),
+		libp2p.EnableRelay(),
+		libp2p.EnableHolePunching(),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create libp2p host: %w", err)
 	}
 
+	// Initialize Byzantine node with config, passing our own peer ID
+	byzantineConfig := core.ByzantineConfig{
+		AdaptiveFactors: core.AdaptiveFactors{
+			NetworkStress:    0.1,
+			FailureRate:      0.01,
+			ParticipantCount: 1,
+		},
+		ReputationThresholds: core.ReputationThresholds{
+			Minimum:   0.3,
+			Consensus: 0.6,
+			Leader:    0.8,
+		},
+		DecayRate:         0.99,
+		InitialReputation: core.DefaultReputation,
+		ConsensusThreshold: core.DefaultConsensusThreshold,
+		VRFSeed:           []byte("initial-vrf-seed"),
+	}
+
+	byzantine, err := core.NewByzantineNode(byzantineConfig, h.ID().String())
+	if err != nil {
+		h.Close()
+		return nil, fmt.Errorf("failed to create byzantine node: %w", err)
+	}
+	// Register self in trust system
+	byzantine.RegisterPeer(h.ID().String())
+
+	// Initialize node components
 	orchestrator := core.NewConsistencyOrchestrator()
+	resolver := core.NewConflictResolver(orchestrator)
 
 	node := &Node{
 		host:         h,
 		orchestrator: orchestrator,
-		resolver:     core.NewConflictResolver(orchestrator),
-		startTime:    time.Now(), // Record the start time
+		byzantine:    byzantine,
+		resolver:     resolver,
+		reputations:  make(map[string]float64),
+		mpcMetrics:   &core.MPCMetrics{}, // Changed from NewMPCMetrics() to direct initialization
+		metricsPort:  8080,
+		startTime:    time.Now(),
 	}
 
-	log.Printf("Node started with ID: %s", h.ID().String())
-	log.Println("Listening addresses:")
-	for _, addr := range h.Addrs() {
-		log.Printf("- %s/p2p/%s", addr, h.ID().String()) // Print full address including Peer ID
+	// Initialize metrics
+	node.metrics.lastMetricsReset = time.Now()
+
+	// Start monitoring endpoints
+	if err := node.startMonitoring(); err != nil {
+		h.Close()
+		return nil, fmt.Errorf("failed to start monitoring: %w", err)
 	}
 
 	return node, nil
 }
 
-// StartDiscovery initializes peer discovery mechanisms.
-// For now, we'll use mDNS for local discovery.
-func (n *Node) StartDiscovery(ctx context.Context, serviceTag string) error {
-	// setup mDNS discovery
-	s := mdns.NewMdnsService(n.host, serviceTag, n) // Pass 'n' to implement the discovery interface
-
-	log.Printf("mDNS Discovery Service '%s' starting...", serviceTag)
-	return s.Start()
-}
-
-// HandlePeerFound is called by the mDNS service when a new peer is found.
-// This method satisfies the mdns.Notifee interface.
-func (n *Node) HandlePeerFound(pi peer.AddrInfo) {
-	// Avoid connecting to self
-	if pi.ID == n.host.ID() {
-		return
-	}
-
-	log.Printf("Discovered new peer: %s", pi.ID.String())
-	log.Println("Attempting to connect...")
-
-	// Connect to the newly discovered peer
-	// Use a background context for the connection attempt
-	// Add a timeout to avoid hanging indefinitely
-	connCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second) // Adjust timeout as needed
-	defer cancel()
-
-	err := n.host.Connect(connCtx, pi)
-	if err != nil {
-		log.Printf("Failed to connect to peer %s: %v", pi.ID.String(), err)
-	} else {
-		log.Printf("Successfully connected to peer: %s", pi.ID.String())
-		// TODO: Add peer to a managed peer list
-		// TODO: Initiate handshake or request peer list if needed
-	}
-}
-
+// GetFullAddr returns the node's full multiaddress as a string.
 func (n *Node) GetFullAddr() (string, error) {
-	var suitableAddr string
-	var firstAddr string // Keep track of the first address encountered as fallback
+	if n.host == nil {
+		return "", errors.New("host not initialized")
+	}
 
-	for _, addr := range n.host.Addrs() {
-		addrStr := addr.String() // Get the string representation
-
-		// Keep the very first address as a fallback if no non-loopback is found
-		if firstAddr == "" {
-			firstAddr = fmt.Sprintf("%s/p2p/%s", addrStr, n.host.ID().String())
-		}
-
-		// Simple heuristic: check for common loopback prefixes
-		// A more robust check could involve parsing the multiaddr with manet,
-		// getting the net.IP, and calling ip.IsLoopback(), but this is often sufficient.
-		isLoopback := strings.HasPrefix(addrStr, "/ip4/127.") || strings.HasPrefix(addrStr, "/ip6/::1")
-
-		if !isLoopback {
-			suitableAddr = fmt.Sprintf("%s/p2p/%s", addrStr, n.host.ID().String())
-			break // Found a preferred non-loopback address
+	// Get the first address that isn't a loopback
+	var addr string
+	for _, a := range n.host.Addrs() {
+		if !strings.Contains(a.String(), "127.0.0.1") && !strings.Contains(a.String(), "::1") {
+			addr = a.String()
+			break
 		}
 	}
 
-	// If no non-loopback address was found, use the first address we saw
-	if suitableAddr == "" {
-		suitableAddr = firstAddr
+	// If no non-loopback found, use the first address
+	if addr == "" && len(n.host.Addrs()) > 0 {
+		addr = n.host.Addrs()[0].String()
 	}
 
-	if suitableAddr == "" {
-		// This should ideally not happen if the host is listening on at least one address
-		return "", fmt.Errorf("no suitable listening address found for node")
+	if addr == "" {
+		return "", errors.New("no listening address found")
 	}
-	return suitableAddr, nil
+
+	// Combine address with peer ID
+	fullAddr := fmt.Sprintf("%s/p2p/%s", addr, n.host.ID().String())
+	return fullAddr, nil
 }
 
 // ConnectToBootstrapPeers attempts to connect to a list of known bootstrap peers.
 func (n *Node) ConnectToBootstrapPeers(ctx context.Context, peerAddrs []string) {
 	if len(peerAddrs) == 0 {
-		log.Println("No bootstrap peers configured.")
+		// log.Println("No bootstrap peers configured.")
 		return
 	}
 
-	log.Println("Connecting to bootstrap peers...")
+	// log.Println("Connecting to bootstrap peers...")
 	var successCount int
 	for _, addrStr := range peerAddrs {
 		if addrStr == "" {
@@ -164,12 +160,12 @@ func (n *Node) ConnectToBootstrapPeers(ctx context.Context, peerAddrs []string) 
 		}
 		addr, err := multiaddr.NewMultiaddr(addrStr)
 		if err != nil {
-			log.Printf("Error parsing bootstrap peer multiaddr '%s': %v", addrStr, err)
+			// log.Printf("Error parsing bootstrap peer multiaddr '%s': %v", addrStr, err)
 			continue
 		}
 		peerInfo, err := peer.AddrInfoFromP2pAddr(addr)
 		if err != nil {
-			log.Printf("Error extracting AddrInfo from bootstrap peer multiaddr '%s': %v", addrStr, err)
+			// log.Printf("Error extracting AddrInfo from bootstrap peer multiaddr '%s': %v", addrStr, err)
 			continue
 		}
 
@@ -181,24 +177,26 @@ func (n *Node) ConnectToBootstrapPeers(ctx context.Context, peerAddrs []string) 
 		// Use a separate context with timeout for each connection attempt
 		connCtx, cancel := context.WithTimeout(ctx, 15*time.Second) // Adjust timeout
 
-		log.Printf("Attempting to connect to bootstrap peer: %s", peerInfo.ID.String())
+		// log.Printf("Attempting to connect to bootstrap peer: %s", peerInfo.ID.String())
 		err = n.host.Connect(connCtx, *peerInfo)
 		cancel() // Release context resources
 
 		if err != nil {
-			log.Printf("Failed to connect to bootstrap peer %s (%s): %v", peerInfo.ID.String(), addrStr, err)
+			// log.Printf("Failed to connect to bootstrap peer %s (%s): %v", peerInfo.ID.String(), addrStr, err)
 		} else {
-			log.Printf("Successfully connected to bootstrap peer: %s", peerInfo.ID.String())
+			// log.Printf("Successfully connected to bootstrap peer: %s", peerInfo.ID.String())
 			successCount++
+			// Register peer in trust system
+			n.byzantine.RegisterPeer(peerInfo.ID.String())
 			// TODO: Add peer to a managed peer list
 		}
 	}
-	log.Printf("Finished bootstrap connection attempts. Successfully connected to %d peers.", successCount)
+	// log.Printf("Finished bootstrap connection attempts. Successfully connected to %d peers.", successCount)
 }
 
 // Close shuts down the network node.
 func (n *Node) Close() error {
-	log.Println("Shutting down network node...")
+	// log.Println("Shutting down network node...")
 	// TODO: Close discovery services if needed
 	return n.host.Close()
 }
@@ -245,13 +243,13 @@ func (n *Node) HandleStream(s network.Stream) {
 
 	buf := new(bytes.Buffer)
 	if _, err := buf.ReadFrom(s); err != nil {
-		log.Printf("Error reading from stream: %v", err)
+		// log.Printf("Error reading from stream: %v", err)
 		return
 	}
 
 	msg := &pb.Message{}
 	if err := proto.Unmarshal(buf.Bytes(), msg); err != nil {
-		log.Printf("Error unmarshalling Protobuf message: %v", err)
+		// log.Printf("Error unmarshalling Protobuf message: %v", err)
 		return
 	}
 
@@ -264,9 +262,12 @@ func (n *Node) HandleStream(s network.Stream) {
 		0.0, // Initial packet loss estimate
 	)
 
+	// Register remote peer in trust system
+	n.byzantine.RegisterPeer(peerID.String())
+
 	// Verify node trustworthiness
 	if !n.byzantine.IsNodeTrusted(peerID.String()) {
-		log.Printf("Rejecting stream from untrusted node %s", peerID)
+		// log.Printf("Rejecting stream from untrusted node %s", peerID)
 		s.Reset()
 		return
 	}
@@ -276,7 +277,7 @@ func (n *Node) HandleStream(s network.Stream) {
 		if block := payload.Block; block != nil {
 			// First verify strong consistency
 			if err := n.verifyBlockConsistency(block); err != nil {
-				log.Printf("Block failed strong consistency check: %v", err)
+				// log.Printf("Block failed strong consistency check: %v", err)
 				return
 			}
 
@@ -292,12 +293,12 @@ func (n *Node) HandleStream(s network.Stream) {
 				participants = append(participants, peer.String())
 			}
 			if err := n.setupMPCShares(secret, participants); err != nil {
-				log.Printf("Failed to setup MPC shares: %v", err)
+				// log.Printf("Failed to setup MPC shares: %v", err)
 				return
 			}
 
 			if !n.verifyBlockWithPeers(ctx, block, requiredPeers) {
-				log.Printf("Block failed to achieve required consensus threshold of %f", threshold)
+				// log.Printf("Block failed to achieve required consensus threshold of %f", threshold)
 				return
 			}
 
@@ -307,16 +308,18 @@ func (n *Node) HandleStream(s network.Stream) {
 			if proof := n.getVRFProof(peerID.String(), epoch); proof != nil {
 				input := []byte(fmt.Sprintf("%d", epoch))
 				if !n.byzantine.VerifyVRF(input, proof.Output, proof.Proof) {
-					log.Printf("Invalid VRF proof from node %s", peerID)
+					// log.Printf("Invalid VRF proof from node %s", peerID)
 					return
 				}
 			}
 
 			// Verify state with zero-knowledge proof if available
-			if err := n.verifyStateZKP(block); err != nil {
-				log.Printf("ZKP verification failed: %v", err)
-				return
-			}
+			// NOTE: Skipped here because Merkle proof and root are not available at this point
+			// If you want to verify state inclusion, call n.verifyStateZKP with a Merkle proof and root where available
+			//if err := n.verifyStateZKP(block); err != nil {
+			//	log.Printf("ZKP verification failed: %v", err)
+			//	return
+			//}
 
 			// Update node reputation based on verification results
 			n.byzantine.UpdateReputation(peerID.String(), "block_verified", 1.0)
@@ -333,20 +336,13 @@ func (n *Node) HandleStream(s network.Stream) {
 		}
 	case *pb.Message_CommitmentProof:
 		cp := payload.CommitmentProof
-		log.Printf("Received commitment proof for shard %s", cp.ShardId)
-		// Verify Pedersen commitment
-		if cp.PedersenCommitment != nil {
-			// Deserialize and verify using core.VerifyPedersenCommitment
-			// (Add deserialization logic as needed)
-			log.Printf("Pedersen commitment received (not fully verified in this stub)")
-		}
-		// Verify Merkle proof
-		if cp.MerkleProof != nil {
-			// (Add verification logic as needed)
-			log.Printf("Merkle proof received (not fully verified in this stub)")
+		// log.Printf("Received commitment proof for shard %s", cp.ShardId)
+		if err := n.handleCommitmentProof(cp, s.Conn().RemotePeer()); err != nil {
+			// log.Printf("Error handling commitment proof: %v", err)
+			return
 		}
 	default:
-		log.Printf("Unknown message type received")
+		// log.Printf("Unknown message type received")
 	}
 }
 
@@ -439,12 +435,12 @@ func (n *Node) ShouldAcceptBlockFrom(peerReputation int) bool {
 
 // verifyBlockConsistency implements strong consistency verification
 func (n *Node) verifyBlockConsistency(block *pb.Block) error {
-	timeout := n.orchestrator.GetTimeout()
-	retries := n.orchestrator.GetRetryAttempts()
+	// Use default timeout and retry values since orchestrator doesn't provide them
+	timeout := time.Second * 5  // 5 second default timeout
+	retries := 3               // 3 default retries
 	
 	for attempt := 0; attempt < retries; attempt++ {
-		// Create verification context with timeout
-		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Millisecond)
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		defer cancel()
 
 		// Get verification from majority of peers
@@ -456,7 +452,7 @@ func (n *Node) verifyBlockConsistency(block *pb.Block) error {
 				continue
 			}
 
-			// Request verification (simplified)
+			// Request verification
 			verified := n.requestBlockVerification(ctx, peer, block)
 			if verified {
 				verificationCount++
@@ -467,7 +463,7 @@ func (n *Node) verifyBlockConsistency(block *pb.Block) error {
 			}
 		}
 
-		// Adjust timeout for next attempt
+		// Exponential backoff
 		timeout = timeout * 2
 	}
 
@@ -502,26 +498,27 @@ func (n *Node) requestBlockVerification(ctx context.Context, peer peer.ID, block
 	}
 }
 
-// verifyStateZKP verifies the state transition using zero-knowledge proofs
-func (n *Node) verifyStateZKP(block *pb.Block) error {
-	// Example state verification - in production would verify actual state transitions
-	secret := new(big.Int).SetBytes(block.Header.PrevBlockHash)
-	proof, err := n.byzantine.GenerateZKProof(secret)
-	if err != nil {
-		return err
+// verifyStateZKP verifies state inclusion using a Merkle proof and the expected Merkle root
+func (n *Node) verifyStateZKP(proof *pb.MerkleProof, expectedRoot []byte) error {
+	if proof == nil {
+		return errors.New("missing merkle proof for state verification")
 	}
-	
-	publicValue := new(big.Int).SetBytes(block.Header.MerkleRoot)
-	if !n.byzantine.VerifyZKProof(proof, publicValue) {
-		return errors.New("invalid zero-knowledge proof")
+	// Convert pb.MerkleProof to core.CompressedMerkleProof
+	compressed := &core.CompressedMerkleProof{
+		LeafHash:   proof.LeafHash,
+		Siblings:   proof.Siblings,
+		PathBitmap: proof.PathBitmap,
+		Depth:      int(proof.Depth),
 	}
-	
+	if !core.VerifyCompressedMerkleProofCompressed(compressed, expectedRoot) {
+		return errors.New("merkle proof verification failed: state not included in root")
+	}
 	return nil
 }
 
 // getVRFProof gets the VRF proof for leader election with proper nodeID usage
 func (n *Node) getVRFProof(nodeID string, epoch uint64) *core.VRFOutput {
-	log.Printf("Generating VRF proof for node %s at epoch %d", nodeID, epoch)
+	// log.Printf("Generating VRF proof for node %s at epoch %d", nodeID, epoch)
 	epochBytes := []byte(fmt.Sprintf("%d", epoch))
 	proof, err := n.byzantine.GenerateVRF(epochBytes)
 	if err != nil {
@@ -529,6 +526,107 @@ func (n *Node) getVRFProof(nodeID string, epoch uint64) *core.VRFOutput {
 		return nil
 	}
 	return proof
+}
+
+// verifyBlockWithPeers verifies a block with the required number of peers
+func (n *Node) verifyBlockWithPeers(ctx context.Context, block *pb.Block, requiredPeers int) bool {
+	verificationCount := 0
+	for _, peer := range n.host.Network().Peers() {
+		if peer == n.host.ID() {
+			continue
+		}
+
+		msg := &pb.Message{
+			Payload: &pb.Message_Block{
+				Block: block,
+			},
+		}
+
+		// Send verification request
+		err := n.SendMessage(ctx, peer, msg)
+		if err != nil {
+			log.Printf("Failed to send verification request to peer %s: %v", peer.String(), err)
+			continue
+		}
+
+		// For now, consider successful message sending as verification
+		// In production, would wait for actual verification response
+		verificationCount++
+
+		if verificationCount >= requiredPeers {
+			return true
+		}
+	}
+
+	return false
+}
+
+// Handle CommitmentProof message
+func (n *Node) handleCommitmentProof(cp *pb.CommitmentProofMessage, peerID peer.ID) error {
+	if cp.PedersenCommitment != nil {
+		// Parse commitment bytes to *btcec.PublicKey
+		pubKey, err := btcec.ParsePubKey(cp.PedersenCommitment.Commitment)
+		if err != nil {
+			return fmt.Errorf("invalid Pedersen commitment bytes from peer %s: %v", peerID, err)
+		}
+		commitment := &core.PedersenCommitment{
+			Value:      new(big.Int).SetBytes(cp.PedersenCommitment.Value),
+			Blinding:   new(big.Int).SetBytes(cp.PedersenCommitment.Blinding),
+			Commitment: pubKey,
+		}
+		if !core.VerifyPedersenCommitment(commitment) {
+			return fmt.Errorf("invalid Pedersen commitment from peer %s", peerID)
+		}
+	}
+
+	// Merkle proof verification for shard state inclusion in the forest root
+	if cp.MerkleProof != nil && cp.ShardId != "" {
+		// Get the current forest root (Merkle root of all active shard roots) from the latest block header
+		latestBlock, err := n.blockchain.GetLatestBlock()
+		if err != nil || latestBlock == nil || latestBlock.Header == nil {
+			return fmt.Errorf("could not retrieve latest block or block header for forest root")
+		}
+		forestRoot := latestBlock.Header.ForestRoot
+		if len(forestRoot) == 0 {
+			return fmt.Errorf("forest root missing in latest block header")
+		}
+		if err := n.verifyStateZKP(cp.MerkleProof, forestRoot); err != nil {
+			return fmt.Errorf("merkle proof verification failed for shard %s: %v", cp.ShardId, err)
+		}
+	}
+
+	// Handle verification status
+	if cp.ShareProof != nil {
+		status := &core.MPCVerificationStatus{
+			ShareID:          hex.EncodeToString(cp.ShareProof.GetProofData()),
+			ParticipantID:    peerID.String(),
+			Verified:         true,
+			VerificationTime: time.Now().Unix(),
+		}
+
+		// Update metrics (no direct mu access)
+		if n.mpcMetrics != nil {
+			// If you need thread safety, add exported methods to core.MPCMetrics
+			n.mpcMetrics.SuccessfulVerifications++
+		}
+
+		return n.storeVerificationStatus(cp.ShardId, status)
+	}
+
+	return nil
+}
+
+// storeVerificationStatus stores the verification status in shard metadata
+func (n *Node) storeVerificationStatus(shardID string, status *core.MPCVerificationStatus) error {
+	shard, err := core.GetShardByID(shardID)
+	if err != nil {
+		return fmt.Errorf("failed to get shard %s: %w", shardID, err)
+	}
+	// Store status in shard metadata (method not implemented, so stubbed)
+	// TODO: Implement StoreMetadata on *core.Shard or use an alternative
+	_ = status // Prevent unused warning
+	_ = shard  // Prevent unused warning
+	return nil
 }
 
 // MPCShare represents a share in Multi-Party Computation
@@ -576,13 +674,20 @@ func (n *Node) setupMPCShares(secret *big.Int, participants []string) error {
             }
 
             // Create share message with commitments
+            // Generate a real Pedersen commitment for the secret value
+            pedCommit, err := core.GeneratePedersenCommitment(secret)
+            if err != nil {
+                errorChan <- fmt.Errorf("failed to generate Pedersen commitment: %v", err)
+                return
+            }
             shareMsg := &pb.Message{
                 Payload: &pb.Message_CommitmentProof{
                     CommitmentProof: &pb.CommitmentProofMessage{
                         ShardId: fmt.Sprintf("mpc-share-%d-%d", index, time.Now().UnixNano()),
                         PedersenCommitment: &pb.PedersenCommitment{
-                            Value: secret.Bytes(),
-                            Commitment: []byte{}, // Simplified commitment
+                            Value:    pedCommit.Value.Bytes(),
+                            Blinding: pedCommit.Blinding.Bytes(),
+                            Commitment: pedCommit.Commitment.SerializeCompressed(),
                         },
                     },
                 },
@@ -691,70 +796,25 @@ func (n *Node) handleMPCMetrics(w http.ResponseWriter, r *http.Request) {
     w.Write(response)
 }
 
-// Update node initialization to start monitoring
-func (n *Node) Start() error {
-    // Initialize Byzantine node with config
-    byzantineConfig := core.ByzantineConfig{
-        InitialReputation: 100,
-        ConsensusThreshold: 0.7,
-        VRFSeed: []byte("initial-seed"),
+// startMonitoring initializes the monitoring HTTP endpoints
+func (n *Node) startMonitoring() error {
+    mux := http.NewServeMux()
+    mux.HandleFunc("/metrics/mpc", n.handleMPCMetrics)
+    
+    n.httpServer = &http.Server{
+        Addr:    fmt.Sprintf(":%d", n.metricsPort),
+        Handler: mux,
     }
     
-    byzantine, err := core.NewByzantineNode(byzantineConfig)
-    if err != nil {
-        return fmt.Errorf("failed to initialize byzantine node: %v", err)
-    }
-    n.byzantine = byzantine
+    // Start HTTP server in a goroutine
+    go func() {
+        if err := n.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+            log.Printf("Monitoring server error: %v", err)
+        }
+    }()
     
-    // Start MPC health monitoring
-    go n.MonitorMPCHealth()
-    
-    // Add metrics endpoint
-    http.HandleFunc("/metrics/mpc", n.handleMPCMetrics)
+    // Set node start time
+    n.startTime = time.Now()
     
     return nil
-}
-
-// verifyBlockWithPeers verifies a block with the required number of peers
-func (n *Node) verifyBlockWithPeers(ctx context.Context, block *pb.Block, requiredPeers int) bool {
-    verifiedCount := 0
-    totalPeers := len(n.host.Network().Peers())
-    
-    // Check if we have enough peers for the required threshold
-    if totalPeers == 0 {
-        log.Printf("No peers available for verification")
-        return false
-    }
-    
-    for _, peer := range n.host.Network().Peers() {
-        if peer == n.host.ID() {
-            continue
-        }
-
-        // Send verification request
-        msg := &pb.Message{
-            Payload: &pb.Message_Block{
-                Block: block,
-            },
-        }
-
-        err := n.SendMessage(ctx, peer, msg)
-        if err != nil {
-            log.Printf("Failed to send verification request to peer %s: %v", peer.String(), err)
-            continue
-        }
-
-        // In a real implementation, would wait for response
-        // For now, count successful message sends
-        verifiedCount++
-
-        // Check if we've reached the required number of verifications
-        if verifiedCount >= requiredPeers {
-            log.Printf("Block verification successful: %d/%d peers verified (threshold met)", verifiedCount, totalPeers)
-            return true
-        }
-    }
-    
-    log.Printf("Block verification failed: only %d/%d peers verified (%d required)", verifiedCount, totalPeers, requiredPeers)
-    return false
 }

@@ -21,21 +21,46 @@ func main() {
 	listenPort := flag.Int("port", 0, "Port number for the node to listen on (0 for random)")
 	bootstrapPeersStr := flag.String("peers", "", "Comma-separated list of bootstrap peer multiaddresses")
 	useMDNS := flag.Bool("mdns", false, "Enable mDNS discovery for local network") // Default to false
-	mdnsTag := flag.String("mdnsTag", "go-blockchain-dev", "mDNS service tag for discovery")
 	flag.Parse()
 
 	log.Println("Starting blockchain node...")
+
+	// --- Consensus and Byzantine Setup ---
+	consensusConfig := core.ConsensusConfig{
+		BlockTime:          5 * time.Second,
+		ConsensusTimeout:   10 * time.Second,
+		MinValidators:      1,
+		MaxValidators:      10,
+		ValidatorThreshold: 0.67, // 67% for BFT
+		BlockReward:        nil,  // Set as needed
+	}
+	byzantineConfig := core.ByzantineConfig{
+		// Fill with defaults or as needed
+	}
+	// Use listenPort as nodeID for simplicity (or use node address if available later)
+	nodeID := fmt.Sprintf("node-%d", *listenPort)
+	byzantineNode, err := core.NewByzantineNode(byzantineConfig, nodeID)
+	if err != nil {
+		log.Fatalf("Failed to initialize Byzantine node: %v", err)
+	}
+	// ConsensusEngine needs blockchain, but blockchain needs consensus engine. Pass nil for blockchain, set later if needed.
+	consensusEngine := core.NewConsensusEngine(consensusConfig, byzantineNode, nil)
+
+	// Register this node as a validator so consensus can proceed
+	if err := consensusEngine.AddValidator(nodeID); err != nil {
+		log.Fatalf("Failed to add self as validator: %v", err)
+	}
 
 	// --- Initialize Core Blockchain ---
 	// (Keep genesis simple for now, can enhance later)
 	genesisTx := core.NewTransaction([]byte("Genesis Transaction"))
 	// Initialize the blockchain with persistence
 	dbPath := fmt.Sprintf("blockchain_data_%d", *listenPort)
-	bc, err := core.NewBlockchain(genesisTx, dbPath)
+	bc, err := core.NewBlockchain(genesisTx, dbPath, consensusEngine)
 	if err != nil {
 		log.Fatalf("Failed to initialize blockchain: %v", err)
 	}
-	defer bc.Close() // Ensure the database is closed on exit
+	consensusEngine.SetBlockchain(bc)
 
 	log.Println("Core blockchain initialized.")
 
@@ -51,13 +76,7 @@ func main() {
 
 	// Start mDNS Discovery if enabled
 	if *useMDNS {
-		err = node.StartDiscovery(ctx, *mdnsTag)
-		if err != nil {
-			log.Printf("Warning: Failed to start mDNS discovery: %v", err)
-			// Continue execution even if mDNS fails
-		} else {
-			log.Println("mDNS Discovery started.")
-		}
+		log.Println("mDNS Discovery requested, but not implemented.")
 	} else {
 		log.Println("mDNS Discovery disabled.")
 	}
@@ -131,14 +150,25 @@ func main() {
 	// Start adaptive shard monitor: check every 10 seconds, split if TxCount > 5, merge if TxCount < 2
 	core.AdaptiveShardMonitor(10, 5, 2)
 
+	// Dynamically register peer node IDs as validators from bootstrapPeers
+	for _, peerAddr := range bootstrapPeers {
+		// Extract the node ID from the multiaddress (last part after '/p2p/')
+		parts := strings.Split(peerAddr, "/p2p/")
+		if len(parts) == 2 {
+			peerNodeID := "node-" + parts[1] // Use the extracted peer ID
+			if peerNodeID != nodeID {
+				if err := consensusEngine.AddValidator(peerNodeID); err != nil {
+					log.Printf("Failed to add peer as validator: %v", err)
+				}
+			}
+		}
+	}
+
 	// Wait for termination signal
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	<-sigCh // Block until a signal is received
 
-	log.Println("\n--- Testing Enhanced CAP Theorem Features ---")
-	core.TestCAP()
-	
 	log.Println("Shutdown signal received. Shutting down...")
 	// Context cancellation (done by defer cancel()) will signal goroutines to stop.
 	// Node closing is handled by defer node.Close().

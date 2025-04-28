@@ -23,15 +23,14 @@ const (
 
 // Represents a basic transaction (mirrors core.Transaction initially)
 type Transaction struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	Data  []byte                 `protobuf:"bytes,1,opt,name=data,proto3" json:"data,omitempty"`
-	// Future fields:
-	// bytes sender_pub_key = 2;
-	// bytes recipient_addr = 3;
-	// uint64 amount = 4;
-	// uint64 nonce = 5;
-	// bytes signature = 6;
-	Hash          []byte `protobuf:"bytes,7,opt,name=hash,proto3" json:"hash,omitempty"` // Store the transaction hash (calculated separately)
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Data          []byte                 `protobuf:"bytes,1,opt,name=data,proto3" json:"data,omitempty"`
+	SenderPubKey  []byte                 `protobuf:"bytes,2,opt,name=sender_pub_key,json=senderPubKey,proto3" json:"sender_pub_key,omitempty"`
+	RecipientAddr []byte                 `protobuf:"bytes,3,opt,name=recipient_addr,json=recipientAddr,proto3" json:"recipient_addr,omitempty"`
+	Amount        uint64                 `protobuf:"varint,4,opt,name=amount,proto3" json:"amount,omitempty"`
+	Nonce         uint64                 `protobuf:"varint,5,opt,name=nonce,proto3" json:"nonce,omitempty"`
+	Signature     []byte                 `protobuf:"bytes,6,opt,name=signature,proto3" json:"signature,omitempty"`
+	Hash          []byte                 `protobuf:"bytes,7,opt,name=hash,proto3" json:"hash,omitempty"` // Store the transaction hash (calculated separately)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -73,6 +72,41 @@ func (x *Transaction) GetData() []byte {
 	return nil
 }
 
+func (x *Transaction) GetSenderPubKey() []byte {
+	if x != nil {
+		return x.SenderPubKey
+	}
+	return nil
+}
+
+func (x *Transaction) GetRecipientAddr() []byte {
+	if x != nil {
+		return x.RecipientAddr
+	}
+	return nil
+}
+
+func (x *Transaction) GetAmount() uint64 {
+	if x != nil {
+		return x.Amount
+	}
+	return 0
+}
+
+func (x *Transaction) GetNonce() uint64 {
+	if x != nil {
+		return x.Nonce
+	}
+	return 0
+}
+
+func (x *Transaction) GetSignature() []byte {
+	if x != nil {
+		return x.Signature
+	}
+	return nil
+}
+
 func (x *Transaction) GetHash() []byte {
 	if x != nil {
 		return x.Hash
@@ -89,7 +123,8 @@ type BlockHeader struct {
 	ForestRoot    []byte                 `protobuf:"bytes,8,opt,name=forest_root,json=forestRoot,proto3" json:"forest_root,omitempty"` // Merkle root of all active shard roots
 	Timestamp     int64                  `protobuf:"varint,4,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
 	Height        uint32                 `protobuf:"varint,5,opt,name=height,proto3" json:"height,omitempty"`
-	Nonce         uint64                 `protobuf:"varint,6,opt,name=nonce,proto3" json:"nonce,omitempty"` // bytes difficulty_target = 7; // Add later if needed
+	Nonce         uint64                 `protobuf:"varint,6,opt,name=nonce,proto3" json:"nonce,omitempty"`
+	Difficulty    uint32                 `protobuf:"varint,7,opt,name=difficulty,proto3" json:"difficulty,omitempty"` // Mining difficulty target
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -169,6 +204,13 @@ func (x *BlockHeader) GetHeight() uint32 {
 func (x *BlockHeader) GetNonce() uint64 {
 	if x != nil {
 		return x.Nonce
+	}
+	return 0
+}
+
+func (x *BlockHeader) GetDifficulty() uint32 {
+	if x != nil {
+		return x.Difficulty
 	}
 	return 0
 }
@@ -364,19 +406,254 @@ func (x *MerkleProof) GetDepth() uint32 {
 	return 0
 }
 
+// MPCShareProof represents a proof for share verification
+type MPCShareProof struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ProofData     []byte                 `protobuf:"bytes,1,opt,name=proof_data,json=proofData,proto3" json:"proof_data,omitempty"`
+	Commitments   [][]byte               `protobuf:"bytes,2,rep,name=commitments,proto3" json:"commitments,omitempty"`
+	Challenge     []byte                 `protobuf:"bytes,3,opt,name=challenge,proto3" json:"challenge,omitempty"`
+	Response      []byte                 `protobuf:"bytes,4,opt,name=response,proto3" json:"response,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MPCShareProof) Reset() {
+	*x = MPCShareProof{}
+	mi := &file_pb_blockchain_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MPCShareProof) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MPCShareProof) ProtoMessage() {}
+
+func (x *MPCShareProof) ProtoReflect() protoreflect.Message {
+	mi := &file_pb_blockchain_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MPCShareProof.ProtoReflect.Descriptor instead.
+func (*MPCShareProof) Descriptor() ([]byte, []int) {
+	return file_pb_blockchain_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *MPCShareProof) GetProofData() []byte {
+	if x != nil {
+		return x.ProofData
+	}
+	return nil
+}
+
+func (x *MPCShareProof) GetCommitments() [][]byte {
+	if x != nil {
+		return x.Commitments
+	}
+	return nil
+}
+
+func (x *MPCShareProof) GetChallenge() []byte {
+	if x != nil {
+		return x.Challenge
+	}
+	return nil
+}
+
+func (x *MPCShareProof) GetResponse() []byte {
+	if x != nil {
+		return x.Response
+	}
+	return nil
+}
+
+// MPCShareDistribution represents share distribution status
+type MPCShareDistribution struct {
+	state             protoimpl.MessageState   `protogen:"open.v1"`
+	DistributionId    string                   `protobuf:"bytes,1,opt,name=distribution_id,json=distributionId,proto3" json:"distribution_id,omitempty"`
+	TotalShares       int32                    `protobuf:"varint,2,opt,name=total_shares,json=totalShares,proto3" json:"total_shares,omitempty"`
+	DistributedShares int32                    `protobuf:"varint,3,opt,name=distributed_shares,json=distributedShares,proto3" json:"distributed_shares,omitempty"`
+	Participants      []string                 `protobuf:"bytes,4,rep,name=participants,proto3" json:"participants,omitempty"`
+	StartTime         int64                    `protobuf:"varint,5,opt,name=start_time,json=startTime,proto3" json:"start_time,omitempty"`
+	Verifications     []*MPCVerificationStatus `protobuf:"bytes,6,rep,name=verifications,proto3" json:"verifications,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *MPCShareDistribution) Reset() {
+	*x = MPCShareDistribution{}
+	mi := &file_pb_blockchain_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MPCShareDistribution) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MPCShareDistribution) ProtoMessage() {}
+
+func (x *MPCShareDistribution) ProtoReflect() protoreflect.Message {
+	mi := &file_pb_blockchain_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MPCShareDistribution.ProtoReflect.Descriptor instead.
+func (*MPCShareDistribution) Descriptor() ([]byte, []int) {
+	return file_pb_blockchain_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *MPCShareDistribution) GetDistributionId() string {
+	if x != nil {
+		return x.DistributionId
+	}
+	return ""
+}
+
+func (x *MPCShareDistribution) GetTotalShares() int32 {
+	if x != nil {
+		return x.TotalShares
+	}
+	return 0
+}
+
+func (x *MPCShareDistribution) GetDistributedShares() int32 {
+	if x != nil {
+		return x.DistributedShares
+	}
+	return 0
+}
+
+func (x *MPCShareDistribution) GetParticipants() []string {
+	if x != nil {
+		return x.Participants
+	}
+	return nil
+}
+
+func (x *MPCShareDistribution) GetStartTime() int64 {
+	if x != nil {
+		return x.StartTime
+	}
+	return 0
+}
+
+func (x *MPCShareDistribution) GetVerifications() []*MPCVerificationStatus {
+	if x != nil {
+		return x.Verifications
+	}
+	return nil
+}
+
+// MPCVerificationStatus represents verification status for a share
+type MPCVerificationStatus struct {
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	ShareId          string                 `protobuf:"bytes,1,opt,name=share_id,json=shareId,proto3" json:"share_id,omitempty"`
+	ParticipantId    string                 `protobuf:"bytes,2,opt,name=participant_id,json=participantId,proto3" json:"participant_id,omitempty"`
+	Verified         bool                   `protobuf:"varint,3,opt,name=verified,proto3" json:"verified,omitempty"`
+	VerificationTime int64                  `protobuf:"varint,4,opt,name=verification_time,json=verificationTime,proto3" json:"verification_time,omitempty"`
+	Errors           []string               `protobuf:"bytes,5,rep,name=errors,proto3" json:"errors,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *MPCVerificationStatus) Reset() {
+	*x = MPCVerificationStatus{}
+	mi := &file_pb_blockchain_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MPCVerificationStatus) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MPCVerificationStatus) ProtoMessage() {}
+
+func (x *MPCVerificationStatus) ProtoReflect() protoreflect.Message {
+	mi := &file_pb_blockchain_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MPCVerificationStatus.ProtoReflect.Descriptor instead.
+func (*MPCVerificationStatus) Descriptor() ([]byte, []int) {
+	return file_pb_blockchain_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *MPCVerificationStatus) GetShareId() string {
+	if x != nil {
+		return x.ShareId
+	}
+	return ""
+}
+
+func (x *MPCVerificationStatus) GetParticipantId() string {
+	if x != nil {
+		return x.ParticipantId
+	}
+	return ""
+}
+
+func (x *MPCVerificationStatus) GetVerified() bool {
+	if x != nil {
+		return x.Verified
+	}
+	return false
+}
+
+func (x *MPCVerificationStatus) GetVerificationTime() int64 {
+	if x != nil {
+		return x.VerificationTime
+	}
+	return 0
+}
+
+func (x *MPCVerificationStatus) GetErrors() []string {
+	if x != nil {
+		return x.Errors
+	}
+	return nil
+}
+
 // Commitment/proof exchange message
 type CommitmentProofMessage struct {
 	state              protoimpl.MessageState `protogen:"open.v1"`
 	ShardId            string                 `protobuf:"bytes,1,opt,name=shard_id,json=shardId,proto3" json:"shard_id,omitempty"`
 	PedersenCommitment *PedersenCommitment    `protobuf:"bytes,2,opt,name=pedersen_commitment,json=pedersenCommitment,proto3" json:"pedersen_commitment,omitempty"`
-	MerkleProof        *MerkleProof           `protobuf:"bytes,3,opt,name=merkle_proof,json=merkleProof,proto3" json:"merkle_proof,omitempty"` // Add more fields for cross-shard or accumulator proofs if needed
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	MerkleProof        *MerkleProof           `protobuf:"bytes,3,opt,name=merkle_proof,json=merkleProof,proto3" json:"merkle_proof,omitempty"`
+	// Add more fields for cross-shard or accumulator proofs if needed
+	ShareProof     *MPCShareProof `protobuf:"bytes,4,opt,name=share_proof,json=shareProof,proto3" json:"share_proof,omitempty"`
+	DistributionId string         `protobuf:"bytes,5,opt,name=distribution_id,json=distributionId,proto3" json:"distribution_id,omitempty"`
+	ShareIndex     int32          `protobuf:"varint,6,opt,name=share_index,json=shareIndex,proto3" json:"share_index,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *CommitmentProofMessage) Reset() {
 	*x = CommitmentProofMessage{}
-	mi := &file_pb_blockchain_proto_msgTypes[5]
+	mi := &file_pb_blockchain_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -388,7 +665,7 @@ func (x *CommitmentProofMessage) String() string {
 func (*CommitmentProofMessage) ProtoMessage() {}
 
 func (x *CommitmentProofMessage) ProtoReflect() protoreflect.Message {
-	mi := &file_pb_blockchain_proto_msgTypes[5]
+	mi := &file_pb_blockchain_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -401,7 +678,7 @@ func (x *CommitmentProofMessage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CommitmentProofMessage.ProtoReflect.Descriptor instead.
 func (*CommitmentProofMessage) Descriptor() ([]byte, []int) {
-	return file_pb_blockchain_proto_rawDescGZIP(), []int{5}
+	return file_pb_blockchain_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *CommitmentProofMessage) GetShardId() string {
@@ -425,6 +702,266 @@ func (x *CommitmentProofMessage) GetMerkleProof() *MerkleProof {
 	return nil
 }
 
+func (x *CommitmentProofMessage) GetShareProof() *MPCShareProof {
+	if x != nil {
+		return x.ShareProof
+	}
+	return nil
+}
+
+func (x *CommitmentProofMessage) GetDistributionId() string {
+	if x != nil {
+		return x.DistributionId
+	}
+	return ""
+}
+
+func (x *CommitmentProofMessage) GetShareIndex() int32 {
+	if x != nil {
+		return x.ShareIndex
+	}
+	return 0
+}
+
+// Status represents the current state of a node
+type StatusMessage struct {
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	Version           uint32                 `protobuf:"varint,1,opt,name=version,proto3" json:"version,omitempty"`
+	Height            uint32                 `protobuf:"varint,2,opt,name=height,proto3" json:"height,omitempty"`
+	BestHash          []byte                 `protobuf:"bytes,3,opt,name=best_hash,json=bestHash,proto3" json:"best_hash,omitempty"`
+	GenesisHash       []byte                 `protobuf:"bytes,4,opt,name=genesis_hash,json=genesisHash,proto3" json:"genesis_hash,omitempty"`
+	SupportedFeatures []string               `protobuf:"bytes,5,rep,name=supported_features,json=supportedFeatures,proto3" json:"supported_features,omitempty"`
+	TotalDifficulty   uint64                 `protobuf:"varint,6,opt,name=total_difficulty,json=totalDifficulty,proto3" json:"total_difficulty,omitempty"`
+	PeerCount         uint32                 `protobuf:"varint,7,opt,name=peer_count,json=peerCount,proto3" json:"peer_count,omitempty"`
+	IsSyncing         bool                   `protobuf:"varint,8,opt,name=is_syncing,json=isSyncing,proto3" json:"is_syncing,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *StatusMessage) Reset() {
+	*x = StatusMessage{}
+	mi := &file_pb_blockchain_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StatusMessage) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StatusMessage) ProtoMessage() {}
+
+func (x *StatusMessage) ProtoReflect() protoreflect.Message {
+	mi := &file_pb_blockchain_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StatusMessage.ProtoReflect.Descriptor instead.
+func (*StatusMessage) Descriptor() ([]byte, []int) {
+	return file_pb_blockchain_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *StatusMessage) GetVersion() uint32 {
+	if x != nil {
+		return x.Version
+	}
+	return 0
+}
+
+func (x *StatusMessage) GetHeight() uint32 {
+	if x != nil {
+		return x.Height
+	}
+	return 0
+}
+
+func (x *StatusMessage) GetBestHash() []byte {
+	if x != nil {
+		return x.BestHash
+	}
+	return nil
+}
+
+func (x *StatusMessage) GetGenesisHash() []byte {
+	if x != nil {
+		return x.GenesisHash
+	}
+	return nil
+}
+
+func (x *StatusMessage) GetSupportedFeatures() []string {
+	if x != nil {
+		return x.SupportedFeatures
+	}
+	return nil
+}
+
+func (x *StatusMessage) GetTotalDifficulty() uint64 {
+	if x != nil {
+		return x.TotalDifficulty
+	}
+	return 0
+}
+
+func (x *StatusMessage) GetPeerCount() uint32 {
+	if x != nil {
+		return x.PeerCount
+	}
+	return 0
+}
+
+func (x *StatusMessage) GetIsSyncing() bool {
+	if x != nil {
+		return x.IsSyncing
+	}
+	return false
+}
+
+// Request for getting blocks
+type GetBlocksRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	StartHash     []byte                 `protobuf:"bytes,1,opt,name=start_hash,json=startHash,proto3" json:"start_hash,omitempty"`              // Hash of the starting block
+	StopHash      []byte                 `protobuf:"bytes,2,opt,name=stop_hash,json=stopHash,proto3" json:"stop_hash,omitempty"`                 // Hash of the ending block (optional)
+	MaxBlocks     uint32                 `protobuf:"varint,3,opt,name=max_blocks,json=maxBlocks,proto3" json:"max_blocks,omitempty"`             // Maximum number of blocks to return
+	IncludeProofs bool                   `protobuf:"varint,4,opt,name=include_proofs,json=includeProofs,proto3" json:"include_proofs,omitempty"` // Whether to include Merkle proofs
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetBlocksRequest) Reset() {
+	*x = GetBlocksRequest{}
+	mi := &file_pb_blockchain_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetBlocksRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetBlocksRequest) ProtoMessage() {}
+
+func (x *GetBlocksRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_pb_blockchain_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetBlocksRequest.ProtoReflect.Descriptor instead.
+func (*GetBlocksRequest) Descriptor() ([]byte, []int) {
+	return file_pb_blockchain_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *GetBlocksRequest) GetStartHash() []byte {
+	if x != nil {
+		return x.StartHash
+	}
+	return nil
+}
+
+func (x *GetBlocksRequest) GetStopHash() []byte {
+	if x != nil {
+		return x.StopHash
+	}
+	return nil
+}
+
+func (x *GetBlocksRequest) GetMaxBlocks() uint32 {
+	if x != nil {
+		return x.MaxBlocks
+	}
+	return 0
+}
+
+func (x *GetBlocksRequest) GetIncludeProofs() bool {
+	if x != nil {
+		return x.IncludeProofs
+	}
+	return false
+}
+
+// Response for block requests
+type GetBlocksResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Blocks        []*Block               `protobuf:"bytes,1,rep,name=blocks,proto3" json:"blocks,omitempty"`
+	Proofs        []*MerkleProof         `protobuf:"bytes,2,rep,name=proofs,proto3" json:"proofs,omitempty"`
+	HasMore       bool                   `protobuf:"varint,3,opt,name=has_more,json=hasMore,proto3" json:"has_more,omitempty"`   // Indicates if there are more blocks available
+	NextHash      []byte                 `protobuf:"bytes,4,opt,name=next_hash,json=nextHash,proto3" json:"next_hash,omitempty"` // Hash to use for the next request if has_more is true
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetBlocksResponse) Reset() {
+	*x = GetBlocksResponse{}
+	mi := &file_pb_blockchain_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetBlocksResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetBlocksResponse) ProtoMessage() {}
+
+func (x *GetBlocksResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_pb_blockchain_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetBlocksResponse.ProtoReflect.Descriptor instead.
+func (*GetBlocksResponse) Descriptor() ([]byte, []int) {
+	return file_pb_blockchain_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *GetBlocksResponse) GetBlocks() []*Block {
+	if x != nil {
+		return x.Blocks
+	}
+	return nil
+}
+
+func (x *GetBlocksResponse) GetProofs() []*MerkleProof {
+	if x != nil {
+		return x.Proofs
+	}
+	return nil
+}
+
+func (x *GetBlocksResponse) GetHasMore() bool {
+	if x != nil {
+		return x.HasMore
+	}
+	return false
+}
+
+func (x *GetBlocksResponse) GetNextHash() []byte {
+	if x != nil {
+		return x.NextHash
+	}
+	return nil
+}
+
 type Message struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Types that are valid to be assigned to Payload:
@@ -432,6 +969,9 @@ type Message struct {
 	//	*Message_Block
 	//	*Message_Transaction
 	//	*Message_CommitmentProof
+	//	*Message_GetBlocksRequest
+	//	*Message_GetBlocksResponse
+	//	*Message_Status
 	Payload       isMessage_Payload `protobuf_oneof:"payload"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -439,7 +979,7 @@ type Message struct {
 
 func (x *Message) Reset() {
 	*x = Message{}
-	mi := &file_pb_blockchain_proto_msgTypes[6]
+	mi := &file_pb_blockchain_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -451,7 +991,7 @@ func (x *Message) String() string {
 func (*Message) ProtoMessage() {}
 
 func (x *Message) ProtoReflect() protoreflect.Message {
-	mi := &file_pb_blockchain_proto_msgTypes[6]
+	mi := &file_pb_blockchain_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -464,7 +1004,7 @@ func (x *Message) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Message.ProtoReflect.Descriptor instead.
 func (*Message) Descriptor() ([]byte, []int) {
-	return file_pb_blockchain_proto_rawDescGZIP(), []int{6}
+	return file_pb_blockchain_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *Message) GetPayload() isMessage_Payload {
@@ -501,6 +1041,33 @@ func (x *Message) GetCommitmentProof() *CommitmentProofMessage {
 	return nil
 }
 
+func (x *Message) GetGetBlocksRequest() *GetBlocksRequest {
+	if x != nil {
+		if x, ok := x.Payload.(*Message_GetBlocksRequest); ok {
+			return x.GetBlocksRequest
+		}
+	}
+	return nil
+}
+
+func (x *Message) GetGetBlocksResponse() *GetBlocksResponse {
+	if x != nil {
+		if x, ok := x.Payload.(*Message_GetBlocksResponse); ok {
+			return x.GetBlocksResponse
+		}
+	}
+	return nil
+}
+
+func (x *Message) GetStatus() *StatusMessage {
+	if x != nil {
+		if x, ok := x.Payload.(*Message_Status); ok {
+			return x.Status
+		}
+	}
+	return nil
+}
+
 type isMessage_Payload interface {
 	isMessage_Payload()
 }
@@ -517,20 +1084,43 @@ type Message_CommitmentProof struct {
 	CommitmentProof *CommitmentProofMessage `protobuf:"bytes,3,opt,name=commitment_proof,json=commitmentProof,proto3,oneof"`
 }
 
+type Message_GetBlocksRequest struct {
+	GetBlocksRequest *GetBlocksRequest `protobuf:"bytes,4,opt,name=get_blocks_request,json=getBlocksRequest,proto3,oneof"`
+}
+
+type Message_GetBlocksResponse struct {
+	GetBlocksResponse *GetBlocksResponse `protobuf:"bytes,5,opt,name=get_blocks_response,json=getBlocksResponse,proto3,oneof"`
+}
+
+type Message_Status struct {
+	Status *StatusMessage `protobuf:"bytes,6,opt,name=status,proto3,oneof"`
+}
+
 func (*Message_Block) isMessage_Payload() {}
 
 func (*Message_Transaction) isMessage_Payload() {}
 
 func (*Message_CommitmentProof) isMessage_Payload() {}
 
+func (*Message_GetBlocksRequest) isMessage_Payload() {}
+
+func (*Message_GetBlocksResponse) isMessage_Payload() {}
+
+func (*Message_Status) isMessage_Payload() {}
+
 var File_pb_blockchain_proto protoreflect.FileDescriptor
 
 const file_pb_blockchain_proto_rawDesc = "" +
 	"\n" +
-	"\x13pb/blockchain.proto\x12\x02pb\"5\n" +
+	"\x13pb/blockchain.proto\x12\x02pb\"\xce\x01\n" +
 	"\vTransaction\x12\x12\n" +
-	"\x04data\x18\x01 \x01(\fR\x04data\x12\x12\n" +
-	"\x04hash\x18\a \x01(\fR\x04hash\"\xdd\x01\n" +
+	"\x04data\x18\x01 \x01(\fR\x04data\x12$\n" +
+	"\x0esender_pub_key\x18\x02 \x01(\fR\fsenderPubKey\x12%\n" +
+	"\x0erecipient_addr\x18\x03 \x01(\fR\rrecipientAddr\x12\x16\n" +
+	"\x06amount\x18\x04 \x01(\x04R\x06amount\x12\x14\n" +
+	"\x05nonce\x18\x05 \x01(\x04R\x05nonce\x12\x1c\n" +
+	"\tsignature\x18\x06 \x01(\fR\tsignature\x12\x12\n" +
+	"\x04hash\x18\a \x01(\fR\x04hash\"\xfd\x01\n" +
 	"\vBlockHeader\x12\x18\n" +
 	"\aversion\x18\x01 \x01(\rR\aversion\x12&\n" +
 	"\x0fprev_block_hash\x18\x02 \x01(\fR\rprevBlockHash\x12\x1f\n" +
@@ -540,7 +1130,10 @@ const file_pb_blockchain_proto_rawDesc = "" +
 	"forestRoot\x12\x1c\n" +
 	"\ttimestamp\x18\x04 \x01(\x03R\ttimestamp\x12\x16\n" +
 	"\x06height\x18\x05 \x01(\rR\x06height\x12\x14\n" +
-	"\x05nonce\x18\x06 \x01(\x04R\x05nonce\"\x86\x01\n" +
+	"\x05nonce\x18\x06 \x01(\x04R\x05nonce\x12\x1e\n" +
+	"\n" +
+	"difficulty\x18\a \x01(\rR\n" +
+	"difficulty\"\x86\x01\n" +
 	"\x05Block\x12'\n" +
 	"\x06header\x18\x01 \x01(\v2\x0f.pb.BlockHeaderR\x06header\x123\n" +
 	"\ftransactions\x18\x02 \x03(\v2\x0f.pb.TransactionR\ftransactions\x12\x1f\n" +
@@ -557,15 +1150,66 @@ const file_pb_blockchain_proto_rawDesc = "" +
 	"\bsiblings\x18\x02 \x03(\fR\bsiblings\x12\x1f\n" +
 	"\vpath_bitmap\x18\x03 \x01(\x04R\n" +
 	"pathBitmap\x12\x14\n" +
-	"\x05depth\x18\x04 \x01(\rR\x05depth\"\xb0\x01\n" +
+	"\x05depth\x18\x04 \x01(\rR\x05depth\"\x8a\x01\n" +
+	"\rMPCShareProof\x12\x1d\n" +
+	"\n" +
+	"proof_data\x18\x01 \x01(\fR\tproofData\x12 \n" +
+	"\vcommitments\x18\x02 \x03(\fR\vcommitments\x12\x1c\n" +
+	"\tchallenge\x18\x03 \x01(\fR\tchallenge\x12\x1a\n" +
+	"\bresponse\x18\x04 \x01(\fR\bresponse\"\x95\x02\n" +
+	"\x14MPCShareDistribution\x12'\n" +
+	"\x0fdistribution_id\x18\x01 \x01(\tR\x0edistributionId\x12!\n" +
+	"\ftotal_shares\x18\x02 \x01(\x05R\vtotalShares\x12-\n" +
+	"\x12distributed_shares\x18\x03 \x01(\x05R\x11distributedShares\x12\"\n" +
+	"\fparticipants\x18\x04 \x03(\tR\fparticipants\x12\x1d\n" +
+	"\n" +
+	"start_time\x18\x05 \x01(\x03R\tstartTime\x12?\n" +
+	"\rverifications\x18\x06 \x03(\v2\x19.pb.MPCVerificationStatusR\rverifications\"\xba\x01\n" +
+	"\x15MPCVerificationStatus\x12\x19\n" +
+	"\bshare_id\x18\x01 \x01(\tR\ashareId\x12%\n" +
+	"\x0eparticipant_id\x18\x02 \x01(\tR\rparticipantId\x12\x1a\n" +
+	"\bverified\x18\x03 \x01(\bR\bverified\x12+\n" +
+	"\x11verification_time\x18\x04 \x01(\x03R\x10verificationTime\x12\x16\n" +
+	"\x06errors\x18\x05 \x03(\tR\x06errors\"\xae\x02\n" +
 	"\x16CommitmentProofMessage\x12\x19\n" +
 	"\bshard_id\x18\x01 \x01(\tR\ashardId\x12G\n" +
 	"\x13pedersen_commitment\x18\x02 \x01(\v2\x16.pb.PedersenCommitmentR\x12pedersenCommitment\x122\n" +
-	"\fmerkle_proof\x18\x03 \x01(\v2\x0f.pb.MerkleProofR\vmerkleProof\"\xb5\x01\n" +
+	"\fmerkle_proof\x18\x03 \x01(\v2\x0f.pb.MerkleProofR\vmerkleProof\x122\n" +
+	"\vshare_proof\x18\x04 \x01(\v2\x11.pb.MPCShareProofR\n" +
+	"shareProof\x12'\n" +
+	"\x0fdistribution_id\x18\x05 \x01(\tR\x0edistributionId\x12\x1f\n" +
+	"\vshare_index\x18\x06 \x01(\x05R\n" +
+	"shareIndex\"\x99\x02\n" +
+	"\rStatusMessage\x12\x18\n" +
+	"\aversion\x18\x01 \x01(\rR\aversion\x12\x16\n" +
+	"\x06height\x18\x02 \x01(\rR\x06height\x12\x1b\n" +
+	"\tbest_hash\x18\x03 \x01(\fR\bbestHash\x12!\n" +
+	"\fgenesis_hash\x18\x04 \x01(\fR\vgenesisHash\x12-\n" +
+	"\x12supported_features\x18\x05 \x03(\tR\x11supportedFeatures\x12)\n" +
+	"\x10total_difficulty\x18\x06 \x01(\x04R\x0ftotalDifficulty\x12\x1d\n" +
+	"\n" +
+	"peer_count\x18\a \x01(\rR\tpeerCount\x12\x1d\n" +
+	"\n" +
+	"is_syncing\x18\b \x01(\bR\tisSyncing\"\x94\x01\n" +
+	"\x10GetBlocksRequest\x12\x1d\n" +
+	"\n" +
+	"start_hash\x18\x01 \x01(\fR\tstartHash\x12\x1b\n" +
+	"\tstop_hash\x18\x02 \x01(\fR\bstopHash\x12\x1d\n" +
+	"\n" +
+	"max_blocks\x18\x03 \x01(\rR\tmaxBlocks\x12%\n" +
+	"\x0einclude_proofs\x18\x04 \x01(\bR\rincludeProofs\"\x97\x01\n" +
+	"\x11GetBlocksResponse\x12!\n" +
+	"\x06blocks\x18\x01 \x03(\v2\t.pb.BlockR\x06blocks\x12'\n" +
+	"\x06proofs\x18\x02 \x03(\v2\x0f.pb.MerkleProofR\x06proofs\x12\x19\n" +
+	"\bhas_more\x18\x03 \x01(\bR\ahasMore\x12\x1b\n" +
+	"\tnext_hash\x18\x04 \x01(\fR\bnextHash\"\xf1\x02\n" +
 	"\aMessage\x12!\n" +
 	"\x05block\x18\x01 \x01(\v2\t.pb.BlockH\x00R\x05block\x123\n" +
 	"\vtransaction\x18\x02 \x01(\v2\x0f.pb.TransactionH\x00R\vtransaction\x12G\n" +
-	"\x10commitment_proof\x18\x03 \x01(\v2\x1a.pb.CommitmentProofMessageH\x00R\x0fcommitmentProofB\t\n" +
+	"\x10commitment_proof\x18\x03 \x01(\v2\x1a.pb.CommitmentProofMessageH\x00R\x0fcommitmentProof\x12D\n" +
+	"\x12get_blocks_request\x18\x04 \x01(\v2\x14.pb.GetBlocksRequestH\x00R\x10getBlocksRequest\x12G\n" +
+	"\x13get_blocks_response\x18\x05 \x01(\v2\x15.pb.GetBlocksResponseH\x00R\x11getBlocksResponse\x12+\n" +
+	"\x06status\x18\x06 \x01(\v2\x11.pb.StatusMessageH\x00R\x06statusB\t\n" +
 	"\apayloadB\x12Z\x10go-blockchain/pbb\x06proto3"
 
 var (
@@ -580,29 +1224,42 @@ func file_pb_blockchain_proto_rawDescGZIP() []byte {
 	return file_pb_blockchain_proto_rawDescData
 }
 
-var file_pb_blockchain_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
+var file_pb_blockchain_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
 var file_pb_blockchain_proto_goTypes = []any{
 	(*Transaction)(nil),            // 0: pb.Transaction
 	(*BlockHeader)(nil),            // 1: pb.BlockHeader
 	(*Block)(nil),                  // 2: pb.Block
 	(*PedersenCommitment)(nil),     // 3: pb.PedersenCommitment
 	(*MerkleProof)(nil),            // 4: pb.MerkleProof
-	(*CommitmentProofMessage)(nil), // 5: pb.CommitmentProofMessage
-	(*Message)(nil),                // 6: pb.Message
+	(*MPCShareProof)(nil),          // 5: pb.MPCShareProof
+	(*MPCShareDistribution)(nil),   // 6: pb.MPCShareDistribution
+	(*MPCVerificationStatus)(nil),  // 7: pb.MPCVerificationStatus
+	(*CommitmentProofMessage)(nil), // 8: pb.CommitmentProofMessage
+	(*StatusMessage)(nil),          // 9: pb.StatusMessage
+	(*GetBlocksRequest)(nil),       // 10: pb.GetBlocksRequest
+	(*GetBlocksResponse)(nil),      // 11: pb.GetBlocksResponse
+	(*Message)(nil),                // 12: pb.Message
 }
 var file_pb_blockchain_proto_depIdxs = []int32{
-	1, // 0: pb.Block.header:type_name -> pb.BlockHeader
-	0, // 1: pb.Block.transactions:type_name -> pb.Transaction
-	3, // 2: pb.CommitmentProofMessage.pedersen_commitment:type_name -> pb.PedersenCommitment
-	4, // 3: pb.CommitmentProofMessage.merkle_proof:type_name -> pb.MerkleProof
-	2, // 4: pb.Message.block:type_name -> pb.Block
-	0, // 5: pb.Message.transaction:type_name -> pb.Transaction
-	5, // 6: pb.Message.commitment_proof:type_name -> pb.CommitmentProofMessage
-	7, // [7:7] is the sub-list for method output_type
-	7, // [7:7] is the sub-list for method input_type
-	7, // [7:7] is the sub-list for extension type_name
-	7, // [7:7] is the sub-list for extension extendee
-	0, // [0:7] is the sub-list for field type_name
+	1,  // 0: pb.Block.header:type_name -> pb.BlockHeader
+	0,  // 1: pb.Block.transactions:type_name -> pb.Transaction
+	7,  // 2: pb.MPCShareDistribution.verifications:type_name -> pb.MPCVerificationStatus
+	3,  // 3: pb.CommitmentProofMessage.pedersen_commitment:type_name -> pb.PedersenCommitment
+	4,  // 4: pb.CommitmentProofMessage.merkle_proof:type_name -> pb.MerkleProof
+	5,  // 5: pb.CommitmentProofMessage.share_proof:type_name -> pb.MPCShareProof
+	2,  // 6: pb.GetBlocksResponse.blocks:type_name -> pb.Block
+	4,  // 7: pb.GetBlocksResponse.proofs:type_name -> pb.MerkleProof
+	2,  // 8: pb.Message.block:type_name -> pb.Block
+	0,  // 9: pb.Message.transaction:type_name -> pb.Transaction
+	8,  // 10: pb.Message.commitment_proof:type_name -> pb.CommitmentProofMessage
+	10, // 11: pb.Message.get_blocks_request:type_name -> pb.GetBlocksRequest
+	11, // 12: pb.Message.get_blocks_response:type_name -> pb.GetBlocksResponse
+	9,  // 13: pb.Message.status:type_name -> pb.StatusMessage
+	14, // [14:14] is the sub-list for method output_type
+	14, // [14:14] is the sub-list for method input_type
+	14, // [14:14] is the sub-list for extension type_name
+	14, // [14:14] is the sub-list for extension extendee
+	0,  // [0:14] is the sub-list for field type_name
 }
 
 func init() { file_pb_blockchain_proto_init() }
@@ -610,10 +1267,13 @@ func file_pb_blockchain_proto_init() {
 	if File_pb_blockchain_proto != nil {
 		return
 	}
-	file_pb_blockchain_proto_msgTypes[6].OneofWrappers = []any{
+	file_pb_blockchain_proto_msgTypes[12].OneofWrappers = []any{
 		(*Message_Block)(nil),
 		(*Message_Transaction)(nil),
 		(*Message_CommitmentProof)(nil),
+		(*Message_GetBlocksRequest)(nil),
+		(*Message_GetBlocksResponse)(nil),
+		(*Message_Status)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -621,7 +1281,7 @@ func file_pb_blockchain_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_pb_blockchain_proto_rawDesc), len(file_pb_blockchain_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   7,
+			NumMessages:   13,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

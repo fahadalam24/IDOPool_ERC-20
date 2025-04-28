@@ -10,12 +10,11 @@ package pb; // Optional Protobuf package specifier
 // Represents a basic transaction (mirrors core.Transaction initially)
 message Transaction {
   bytes data = 1;
-  // Future fields:
-  // bytes sender_pub_key = 2;
-  // bytes recipient_addr = 3;
-  // uint64 amount = 4;
-  // uint64 nonce = 5;
-  // bytes signature = 6;
+  bytes sender_pub_key = 2;
+  bytes recipient_addr = 3;
+  uint64 amount = 4;
+  uint64 nonce = 5;
+  bytes signature = 6;
   bytes hash = 7; // Store the transaction hash (calculated separately)
 }
 
@@ -28,7 +27,7 @@ message BlockHeader {
   int64 timestamp = 4;
   uint32 height = 5;
   uint64 nonce = 6;
-  // bytes difficulty_target = 7; // Add later if needed
+  uint32 difficulty = 7; // Mining difficulty target
 }
 
 // Represents a block (mirrors core.Block)
@@ -93,14 +92,41 @@ message CommitmentProofMessage {
   int32 share_index = 6;
 }
 
+// Status represents the current state of a node
+message StatusMessage {
+    uint32 version = 1;
+    uint32 height = 2;
+    bytes best_hash = 3;
+    bytes genesis_hash = 4;
+    repeated string supported_features = 5;
+    uint64 total_difficulty = 6;
+    uint32 peer_count = 7;
+    bool is_syncing = 8;
+}
+
+// Request for getting blocks
+message GetBlocksRequest {
+    bytes start_hash = 1;    // Hash of the starting block
+    bytes stop_hash = 2;     // Hash of the ending block (optional)
+    uint32 max_blocks = 3;   // Maximum number of blocks to return
+    bool include_proofs = 4; // Whether to include Merkle proofs
+}
+
+// Response for block requests
+message GetBlocksResponse {
+    repeated Block blocks = 1;
+    repeated MerkleProof proofs = 2;
+    bool has_more = 3;       // Indicates if there are more blocks available
+    bytes next_hash = 4;     // Hash to use for the next request if has_more is true
+}
+
 message Message {
     oneof payload {
         Block block = 1;
         Transaction transaction = 2;
         CommitmentProofMessage commitment_proof = 3;
-        // Add other message types later, e.g.:
-        // GetBlocksRequest get_blocks_request = 3;
-        // GetBlocksResponse get_blocks_response = 4;
-        // StatusMessage status = 5;
+        GetBlocksRequest get_blocks_request = 4;
+        GetBlocksResponse get_blocks_response = 5;
+        StatusMessage status = 6;
     }
 }
