@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Clear Local Storage</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; }
+        button { padding: 10px 15px; background: #4CAF50; color: white; border: none; border-radius: 4px; cursor: pointer; }
+        .success { color: #4CAF50; }
+        .steps { background: #f5f5f5; padding: 15px; border-left: 4px solid #2196F3; margin: 20px 0; }
+    </style>
+</head>
+<body>
+    <h1>MetaMask State Reset Tool</h1>
+    <p>This tool will help you resolve sync issues between MetaMask and the local blockchain.</p>
+    
+    <div class="steps">
+        <h3>Complete these steps:</h3>
+        <ol>
+            <li>Click the button below to clear local storage</li>
+            <li>Open MetaMask and go to Settings > Advanced</li>
+            <li>Click "Reset Account" (this won't affect your accounts)</li>
+            <li>Close all browser tabs</li>
+            <li>Restart the application</li>
+        </ol>
+    </div>
+    
+    <button onclick="clearAll()">Clear Local Storage</button>
+    <div id="result"></div>
+    
+    <script>
+        function clearAll() {
+            // Clear all localStorage
+            localStorage.clear();
+            
+            // Clear sessionStorage too
+            sessionStorage.clear();
+            
+            // Try to clear IndexedDB if available
+            if (window.indexedDB) {
+                try {
+                    indexedDB.deleteDatabase('MetaMask-State');
+                    indexedDB.deleteDatabase('_metamask');
+                } catch (e) {
+                    console.log('IndexedDB clear attempt:', e);
+                }
+            }
+            
+            document.getElementById('result').innerHTML = 
+                '<p class="success">Storage cleared successfully!</p>' +
+                '<p>Now complete the remaining steps above to fix your connection.</p>';
+        }
+    </script>
+</body>
+</html>

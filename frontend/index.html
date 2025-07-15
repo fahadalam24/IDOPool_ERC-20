@@ -1,0 +1,1092 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IDO Pool Interface</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            padding: 20px;
+            background-color: #f5f8fa;
+        }
+        .container {
+            background-color: white;
+            border-radius: 10px;
+            padding: 25px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            margin-top: 30px;
+        }
+        .card {
+            margin-bottom: 20px;
+            border: none;
+            border-radius: 10px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+        }
+        .card-header {
+            background-color: #f0f7ff;
+            border-bottom: 1px solid #e3f2fd;
+            font-weight: 600;
+        }
+        .btn-primary {
+            background-color: #3b82f6;
+            border-color: #3b82f6;
+        }
+        .btn-primary:hover {
+            background-color: #2563eb;
+            border-color: #2563eb;
+        }
+        .stats-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        .stat-card {
+            flex: 1;
+            min-width: 200px;
+            padding: 15px;
+            border-radius: 8px;
+            background-color: #f8f9fa;
+            border-left: 4px solid #3b82f6;
+        }
+        .stat-value {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: #1e3a8a;
+        }
+        .stat-label {
+            font-size: 0.875rem;
+            color: #6b7280;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 class="text-center mb-4">IDO Pool Interface</h1>
+        
+        <div id="wallet-connection" class="card mb-4">
+            <div class="card-header">Wallet Connection</div>
+            <div class="card-body">
+                <div id="wallet-status">
+                    <p>Status: <span id="connection-status" class="fw-bold text-danger">Not connected</span></p>
+                    <p>Address: <span id="wallet-address">-</span></p>
+                </div>
+                <button id="connect-wallet" class="btn btn-primary">Connect Wallet</button>
+            </div>
+        </div>
+        
+        <div id="ido-info" class="card mb-4">
+            <div class="card-header">IDO Information</div>
+            <div class="card-body">
+                <div class="stats-container">
+                    <div class="stat-card">
+                        <div class="stat-value" id="ido-status">-</div>
+                        <div class="stat-label">Status</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="soft-cap">-</div>
+                        <div class="stat-label">Soft Cap</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="hard-cap">-</div>
+                        <div class="stat-label">Hard Cap</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="total-raised">-</div>
+                        <div class="stat-label">Total Raised</div>
+                    </div>
+                </div>
+                <div class="row mb-2">
+                    <div class="col-md-6">
+                        <p>Start Time: <span id="start-time">-</span></p>
+                    </div>
+                    <div class="col-md-6">
+                        <p>End Time: <span id="end-time">-</span></p>
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="col-md-6">
+                        <p>Token Price: <span id="token-price">-</span></p>
+                    </div>
+                    <div class="col-md-6">
+                        <p>Tokens Claimable: <span id="tokens-claimable">-</span></p>
+                    </div>
+                </div>
+                <button id="refresh-info" class="btn btn-secondary">Refresh Info</button>
+            </div>
+        </div>
+        
+        <div id="user-actions" class="card mb-4">
+            <div class="card-header">User Actions</div>
+            <div class="card-body">
+                <div class="mb-4">
+                    <h5>Buy Tokens</h5>
+                    <div class="input-group mb-3">
+                        <input type="number" id="buy-amount" class="form-control" placeholder="Amount of payment tokens" min="0">
+                        <button id="approve-tokens" class="btn btn-outline-secondary">Approve</button>
+                        <button id="buy-tokens" class="btn btn-primary">Buy Tokens</button>
+                    </div>
+                </div>
+                
+                <div class="row">
+                    <div class="col-md-6 mb-3">
+                        <h5>Claim Tokens</h5>
+                        <p>Your contribution: <span id="user-contribution">-</span> tokens</p>
+                        <button id="claim-tokens" class="btn btn-success">Claim Tokens</button>
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <h5>Claim Refund</h5>
+                        <p>Refunds enabled: <span id="refunds-enabled">-</span></p>
+                        <button id="claim-refund" class="btn btn-warning">Claim Refund</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div id="admin-actions" class="card">
+            <div class="card-header">Admin Actions</div>
+            <div class="card-body">                <div class="mb-3">
+                    <h5>Manage IDO</h5>
+                    <div>
+                        <div class="mb-3">
+                            <label for="start-time-input" class="form-label">Start Time (seconds from now)</label>
+                            <input type="number" id="start-time-input" class="form-control" value="100" min="0">
+                        </div>
+                        <div class="mb-3">
+                            <label for="end-time-input" class="form-label">Duration (seconds)</label>
+                            <input type="number" id="end-time-input" class="form-control" value="3600" min="0">
+                        </div>
+                        <div class="d-flex gap-2 flex-wrap mb-3">
+                            <button id="start-ido" class="btn btn-primary">Start IDO</button>
+                            <button id="end-ido" class="btn btn-danger">End IDO</button>
+                            <button id="enable-claims" class="btn btn-success">Enable Token Claims</button>
+                            <button id="enable-refunds" class="btn btn-warning">Enable Refunds</button>
+                            <button id="global-refund" class="btn btn-danger">Enable Global Refund</button>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="row">
+                    <div class="col-md-6 mb-3">
+                        <h5>Withdraw Funds</h5>
+                        <button id="withdraw-funds" class="btn btn-info">Withdraw Collected Payments</button>
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <h5>Withdraw Unsold Tokens</h5>
+                        <button id="withdraw-tokens" class="btn btn-info">Withdraw Unsold Tokens</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>    <!-- Use a more reliable CDN for ethers.js -->
+    <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"></script>    <script>        // Contract addresses from deployment
+        const idoPoolAddress = '0x8A791620dd6260079BF849Dc5567aDC3F2FdC318';
+        const idoTokenAddress = '0xa513E6E4b8f2a923D98304ec87F64353C4D5C853';
+        const paymentTokenAddress = '0x2279B7A0a67DB372996a5FaB50D91eAA73d2eBe6';
+        // Contract ABIs
+        const idoPoolABI = [
+            "function idoToken() view returns (address)",
+            "function paymentToken() view returns (address)",
+            "function tokenPrice() view returns (uint256)",
+            "function softCap() view returns (uint256)",
+            "function hardCap() view returns (uint256)",
+            "function startTime() view returns (uint256)",
+            "function endTime() view returns (uint256)",
+            "function refundsEnabled() view returns (bool)",
+            "function tokensClaimable() view returns (bool)",
+            "function totalPaymentCollected() view returns (uint256)",
+            "function owner() view returns (address)",
+            "function startIDO(uint256 _startTime, uint256 _endTime)",
+            "function endIDO()",
+            "function enableTokenClaims()",
+            "function setRefundsEnabled(bool _refundsEnabled)",
+            "function setRefundWindow(uint256 _refundEndTime)",
+            "function enableGlobalRefund()",
+            "function buyTokens(uint256 amount)",
+            "function claimTokens()",
+            "function claimRefund()",
+            "function withdrawCollectedPayments()",
+            "function withdrawUnsoldTokens()",
+            "function getUserInfo(address user) view returns (uint256, uint256, bool, bool)",
+            "function getIDOInfo() view returns (uint256, uint256, uint256, uint256, uint256, bool, bool)"
+        ];
+        
+        const erc20ABI = [
+            "function balanceOf(address account) view returns (uint256)",
+            "function approve(address spender, uint256 amount) returns (bool)",
+            "function allowance(address owner, address spender) view returns (uint256)",
+            "function decimals() view returns (uint8)"
+        ];
+        
+        // Global variables
+        let provider;
+        let signer;
+        let idoPoolContract;
+        let idoTokenContract;
+        let paymentTokenContract;
+        let userAddress;
+        let isOwner = false;          // Get a fresh provider to avoid stale state
+        async function getFreshProvider() {
+            if (window.ethereum) {
+                // Force MetaMask to reload the network state
+                try {
+                    // First disconnect and reconnect to the network
+                    // This helps clear MetaMask's cached state
+                    console.log("Refreshing connection to MetaMask...");
+                    
+                    // Add a delay before attempting to reconnect
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                    
+                    try {
+                        // First try to disconnect from the current chain - this is an aggressive reset
+                        await window.ethereum.request({
+                            method: 'wallet_switchEthereumChain',
+                            params: [{ chainId: '0x1' }] // Temporarily switch to Ethereum Mainnet
+                        });
+                    } catch (switchError) {
+                        console.log("Temporary switch error (expected):", switchError);
+                        // This error is expected if Mainnet isn't configured
+                    }
+                    
+                    // Add another delay
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                    
+                    // Switch back to Hardhat network
+                    await window.ethereum.request({
+                        method: 'wallet_switchEthereumChain',
+                        params: [{ chainId: '0x7A69' }] // 31337 in hex for Hardhat
+                    });
+                    
+                    // Add another delay to ensure connection is established
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                    
+                    // Create a completely new provider instance - explicitly configure for Hardhat
+                    const freshProvider = new ethers.providers.Web3Provider(
+                        window.ethereum,
+                        {
+                            name: 'hardhat',
+                            chainId: 31337,
+                            polling: true, // Enable polling for latest state
+                            pollingInterval: 1000 // Poll every second
+                        }
+                    );
+                    
+                    // Force a refresh of the network state to get latest data
+                    await freshProvider.getNetwork();
+                    
+                    // Force provider to get latest block number
+                    const blockNumber = await freshProvider.getBlockNumber();
+                    console.log("Connected to fresh provider with latest block:", blockNumber);
+                    
+                    return freshProvider;
+                } catch (error) {
+                    console.error("Failed to get fresh provider:", error);
+                    
+                    // Try one more time with a delay
+                    await new Promise(resolve => setTimeout(resolve, 2000));
+                    
+                    try {
+                        // Create a provider with minimal configuration
+                        const lastResortProvider = new ethers.providers.Web3Provider(
+                            window.ethereum,
+                            {
+                                polling: true,
+                                pollingInterval: 1000
+                            }
+                        );
+                        await lastResortProvider.getNetwork();
+                        const blockNumber = await lastResortProvider.getBlockNumber();
+                        console.log("Last resort provider block number:", blockNumber);
+                        return lastResortProvider;
+                    } catch (retryError) {
+                        console.error("Failed on retry:", retryError);
+                        alert("Failed to connect to MetaMask. Please try refreshing the page or resetting your MetaMask account (Settings > Advanced > Reset Account).");
+                        throw retryError;
+                    }
+                }
+            } else {
+                throw new Error("MetaMask not installed");
+            }
+        }
+        
+        // Format ethers values for display
+        function formatEther(value) {
+            try {
+                return ethers.utils.formatEther(value);
+            } catch (error) {
+                console.error("Error formatting value:", error, value);
+                return "0";
+            }
+        }
+        
+        // Convert date object to readable string
+        function formatDate(timestamp) {
+            const date = new Date(timestamp * 1000);
+            return date.toLocaleString();
+        }        // Smart retry function for contract calls with extreme recovery measures
+        async function smartContractCall(contractFunction, ...args) {
+            // This flag tracks if we've already tried extreme recovery
+            if (!window.recoveryAttempted) {
+                window.recoveryAttempted = false;
+            }
+            
+            // Always use explicit blockTag of 'latest' to force using the latest state
+            const overrideOptions = { blockTag: 'latest' };
+            
+            try {
+                // Check if any args were passed
+                if (args.length === 0) {
+                    // No arguments, just use override options
+                    return await contractFunction(overrideOptions);
+                } else {
+                    // Handle the case where the last arg is already an override object
+                    const lastArg = args[args.length - 1];
+                    if (lastArg && typeof lastArg === 'object' && lastArg.blockTag !== undefined) {
+                        // The last argument is already an override object, use it but ensure blockTag is latest
+                        const updatedArg = {...lastArg, blockTag: 'latest'};
+                        return await contractFunction(...args.slice(0, -1), updatedArg);
+                    } else {
+                        // Add override options to the arguments
+                        return await contractFunction(...args, overrideOptions);
+                    }
+                }
+            } catch (error) {
+                // Check for specific invalid block tag error
+                const errorMessage = error?.message || '';
+                const errorData = error?.error?.data?.message || '';
+                const errorObj = error?.error?.data || {};
+                const errorJson = JSON.stringify(error) || '';
+                
+                // More comprehensive check for invalid block tag errors
+                const invalidBlockTagError = 
+                    errorMessage.includes('invalid block tag') || 
+                    errorData.includes('invalid block tag') ||
+                    errorJson.includes('invalid block tag') ||
+                    errorMessage.includes('block number') ||
+                    errorData.includes('block number');
+                
+                console.warn("Contract call failed, attempting recovery:", error);
+                console.log("Error details:", {
+                    message: errorMessage,
+                    data: errorData,
+                    isInvalidBlockTag: invalidBlockTagError
+                });
+                
+                // First try the simple restart approach
+                try {
+                    console.log("ATTEMPT #1: Simple provider refresh...");
+                    
+                    // Create a new completely fresh provider
+                    provider = new ethers.providers.Web3Provider(window.ethereum, {
+                        polling: true,
+                        pollingInterval: 1000
+                    });
+                    
+                    // Force a network refresh
+                    await provider.getNetwork();
+                    const latestBlock = await provider.getBlockNumber();
+                    console.log("Simple refresh - latest block:", latestBlock);
+                    
+                    // Reconnect contracts
+                    idoPoolContract = new ethers.Contract(idoPoolAddress, idoPoolABI, provider);
+                    idoTokenContract = new ethers.Contract(idoTokenAddress, erc20ABI, provider);
+                    paymentTokenContract = new ethers.Contract(paymentTokenAddress, erc20ABI, provider);
+                    
+                    // Update signer if connected
+                    if (userAddress) {
+                        signer = provider.getSigner();
+                    }
+                    
+                    // Try the call with explicit blockTag 0 (safer than 'latest' when state is uncertain)
+                    const safeOptions = { blockTag: 0 };
+                    
+                    if (args.length === 0) {
+                        return await contractFunction(safeOptions);
+                    } else {
+                        return await contractFunction(...args.slice(0, -1), safeOptions);
+                    }
+                } catch (firstRetryError) {
+                    console.error("First retry failed:", firstRetryError);
+                    
+                    // Second attempt with advanced network switching
+                    try {
+                        console.log("ATTEMPT #2: Advanced network cycling...");
+                        
+                        // Temporary disconnect by switching networks
+                        try {
+                            await window.ethereum.request({
+                                method: 'wallet_switchEthereumChain',
+                                params: [{ chainId: '0x1' }] // Ethereum mainnet
+                            });
+                        } catch (switchError) {
+                            console.log("Expected network switch error:", switchError);
+                        }
+                        
+                        // Wait a bit longer
+                        await new Promise(resolve => setTimeout(resolve, 2000));
+                        
+                        // Switch back to Hardhat
+                        try {
+                            await window.ethereum.request({
+                                method: 'wallet_switchEthereumChain',
+                                params: [{ chainId: '0x7A69' }] // Hardhat
+                            });
+                        } catch (switchError) {
+                            console.log("Expected network switch error:", switchError);
+                        }
+                        
+                        // Another delay
+                        await new Promise(resolve => setTimeout(resolve, 2000));
+                        
+                        // Complete refresh of the provider
+                        provider = new ethers.providers.Web3Provider(window.ethereum);
+                        await provider.getNetwork();
+                        
+                        // Force get latest block
+                        const blockNumber = await provider.getBlockNumber();
+                        console.log("Network cycling complete. Latest block:", blockNumber);
+                        
+                        // Reconnect contracts
+                        idoPoolContract = new ethers.Contract(idoPoolAddress, idoPoolABI, provider);
+                        idoTokenContract = new ethers.Contract(idoTokenAddress, erc20ABI, provider);
+                        paymentTokenContract = new ethers.Contract(paymentTokenAddress, erc20ABI, provider);
+                        
+                        // Update signer
+                        if (userAddress) {
+                            signer = provider.getSigner();
+                        }
+                        
+                        // Try with block 0
+                        const zeroBlockOptions = { blockTag: 0 };
+                        
+                        if (args.length === 0) {
+                            return await contractFunction(zeroBlockOptions);
+                        } else {
+                            return await contractFunction(...args.slice(0, -1), zeroBlockOptions);
+                        }
+                    } catch (secondRetryError) {
+                        console.error("Second retry failed:", secondRetryError);
+                        
+                        // Only try the extreme recovery once per session
+                        if (!window.recoveryAttempted) {
+                            window.recoveryAttempted = true;
+                            
+                            // Show clear error message and recovery instructions
+                            const recoveryMessage = 
+                                "MetaMask needs a complete reset to sync with the blockchain.\n\n" +
+                                "INSTRUCTIONS:\n" +
+                                "1. Look for a new tab that has opened with 'Clear Local Storage'\n" +
+                                "2. In MetaMask, go to Settings > Advanced > Reset Account\n" +
+                                "3. Close all browser tabs except this one\n" +
+                                "4. Refresh this page\n\n" +
+                                "Would you like to open the local storage clearing tool?";
+                            
+                            if (confirm(recoveryMessage)) {
+                                // Open the storage clearing tool
+                                window.open('clear-storage.html', '_blank');
+                                
+                                // Also provide immediate reconnection option
+                                setTimeout(() => {
+                                    if (confirm("After completing the steps, would you like to try reconnecting now?")) {
+                                        window.location.reload();
+                                    }
+                                }, 5000);
+                            }
+                            
+                            throw new Error(
+                                "MetaMask is out of sync with the blockchain. " + 
+                                "Please follow the recovery steps and restart the application."
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Verify that contracts exist at the specified addresses
+        async function verifyContracts() {
+            try {
+                console.log('Connecting to IDOPool contract at address:', idoPoolAddress);
+                console.log('Using ABI:', idoPoolABI);
+                
+                // We no longer need explicit override options here
+                // our smartContractCall function will handle this
+                try {
+                    console.log("Calling idoToken() function...");
+                    const idoTokenAddressDebug = await smartContractCall(idoPoolContract.idoToken.bind(idoPoolContract));
+                    console.log('idoToken() call successful! Result:', idoTokenAddressDebug);
+                } catch (error) {
+                    console.error('Error calling idoToken():', {
+                        message: error.message,
+                        stack: error.stack,
+                        transaction: error.transaction,
+                        data: error.data
+                    });
+                    alert("Failed to connect to the blockchain. Please make sure your Hardhat node is running and refresh the page.");
+                }
+
+                try {
+                    console.log("Calling owner() function...");
+                    const ownerAddressDebug = await smartContractCall(idoPoolContract.owner.bind(idoPoolContract));
+                    console.log('owner() call successful! Result:', ownerAddressDebug);
+                } catch (error) {
+                    console.error('Error calling owner():', {
+                        message: error.message,
+                        stack: error.stack,
+                        transaction: error.transaction,
+                        data: error.data
+                    });
+                    alert("Failed to connect to contract owner. Please make sure your Hardhat node is running correctly.");
+                }
+
+                // Check IDO Pool contract
+                const idoTokenAddress1 = await smartContractCall(idoPoolContract.idoToken.bind(idoPoolContract));
+                const paymentTokenAddress1 = await smartContractCall(idoPoolContract.paymentToken.bind(idoPoolContract));
+                console.log("IDO Pool contract verified. IDO token:", idoTokenAddress1, "Payment token:", paymentTokenAddress1);
+                
+                // Check IDO token contract
+                const decimals = await smartContractCall(idoTokenContract.decimals.bind(idoTokenContract));
+                console.log("IDO token contract verified. Decimals:", decimals);
+                
+                // Check payment token contract
+                const decimals2 = await smartContractCall(paymentTokenContract.decimals.bind(paymentTokenContract));
+                console.log("Payment token contract verified. Decimals:", decimals2);
+                
+                return true;
+            } catch (error) {
+                console.error("Contract verification error:", {
+                    message: error.message,
+                    stack: error.stack,
+                    transaction: error.transaction,
+                    data: error.data
+                });
+                throw new Error("Failed to verify contracts: " + error.message);
+            }
+        }        // Check if user is connected to Hardhat Network
+        async function checkNetwork() {
+            try {
+                const network = await provider.getNetwork();
+                console.log("Connected to network:", network.name, "chainId:", network.chainId);
+                
+                // Hardhat network has chainId 31337
+                // Convert BigInt to number for comparison if needed
+                const chainId = typeof network.chainId === 'bigint' ? 
+                    Number(network.chainId) : network.chainId;
+                
+                if (chainId !== 31337) {
+                    alert("Please connect to Hardhat Network (chainId: 31337) in your MetaMask to interact with this dApp");
+                    return false;
+                }
+                console.log("Connected to Hardhat Network successfully");
+                return true;
+            } catch (error) {
+                console.error("Network check error:", error);
+                return false;
+            }
+        }
+          // Initialize the application
+        async function init() {
+            try {
+                // Check if ethers is properly loaded
+                if (typeof ethers === 'undefined') {
+                    console.error("Ethers library not loaded properly");
+                    alert("Ethers library not loaded. Please refresh the page or check console for details.");
+                    return;
+                }
+
+                // Check if MetaMask is installed
+                if (typeof window.ethereum !== 'undefined') {
+                    console.log("MetaMask detected");
+                    // Create ethers provider with a fresh connection to avoid stale state
+                    try {
+                        provider = await getFreshProvider();
+                    } catch (error) {
+                        console.error("Failed to get fresh provider, using standard provider", error);
+                        provider = new ethers.providers.Web3Provider(window.ethereum);
+                    }
+                    
+                    // Connect contracts
+                    idoPoolContract = new ethers.Contract(idoPoolAddress, idoPoolABI, provider);
+                    idoTokenContract = new ethers.Contract(idoTokenAddress, erc20ABI, provider);
+                    paymentTokenContract = new ethers.Contract(paymentTokenAddress, erc20ABI, provider);
+                    
+                    // Setup event listeners
+                    document.getElementById('connect-wallet').addEventListener('click', connectWallet);
+                    document.getElementById('refresh-info').addEventListener('click', refreshIDOInfo);
+                    document.getElementById('approve-tokens').addEventListener('click', approveTokens);
+                    document.getElementById('buy-tokens').addEventListener('click', buyTokens);
+                    document.getElementById('claim-tokens').addEventListener('click', claimTokens);
+                    document.getElementById('claim-refund').addEventListener('click', claimRefund);
+                    document.getElementById('start-ido').addEventListener('click', startIDO);
+                    document.getElementById('end-ido').addEventListener('click', endIDO);
+                    document.getElementById('enable-claims').addEventListener('click', enableTokenClaims);
+                    document.getElementById('enable-refunds').addEventListener('click', enableRefunds);
+                    document.getElementById('global-refund').addEventListener('click', enableGlobalRefund);
+                    document.getElementById('withdraw-funds').addEventListener('click', withdrawFunds);
+                    document.getElementById('withdraw-tokens').addEventListener('click', withdrawTokens);                    // Check network and verify contracts
+                    const isCorrectNetwork = await checkNetwork();
+                    if (isCorrectNetwork) {
+                        try {
+                            await verifyContracts();
+                            console.log("Contract verification passed");
+                        } catch (error) {
+                            console.error("Contract verification failed:", error);
+                            alert("Failed to verify contract addresses. Make sure contracts are deployed correctly.");
+                        }
+                    } else {
+                        console.warn("Not connected to Hardhat Network. Please switch networks to interact with the dApp.");
+                        return; // Exit early if not on the right network
+                    }
+                    
+                    // Check if already connected
+                    const accounts = await provider.listAccounts();
+                    if (accounts.length > 0) {
+                        await handleAccountsChanged(accounts);
+                    }
+                } else {
+                    alert('Please install MetaMask to use this dApp!');
+                }
+            } catch (error) {
+                console.error("Initialization error:", error);
+                alert("Error initializing the application. See console for details.");
+            }
+        }        // Connect to MetaMask
+        async function connectWallet() {
+            try {
+                console.log("Connecting wallet...");
+                document.getElementById('connect-wallet').textContent = "Connecting...";
+                document.getElementById('connect-wallet').disabled = true;
+                
+                // Completely reset the connection first
+                try {
+                    // Add a slight delay to ensure MetaMask has time to reset
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                    
+                    // Reset the network connection to clear any cached state
+                    await window.ethereum.request({
+                        method: 'wallet_switchEthereumChain',
+                        params: [{ chainId: '0x7A69' }] // 31337 in hex for Hardhat
+                    });
+                    console.log("Successfully reset connection to Hardhat network");
+                } catch (resetError) {
+                    console.log("Initial reset attempt:", resetError);
+                    // Continue anyway
+                }
+                
+                // Request accounts
+                console.log("Requesting accounts...");
+                const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+                console.log("Got accounts:", accounts);
+                
+                // Check if connected to the right network
+                const isCorrectNetwork = await checkNetwork();
+                if (!isCorrectNetwork) {
+                    console.log("Not on Hardhat Network. Attempting to switch...");
+                    
+                    // Try to add the Hardhat Network if it doesn't exist
+                    try {
+                        // First try to switch to the network
+                        await window.ethereum.request({
+                            method: 'wallet_switchEthereumChain',
+                            params: [{ chainId: '0x7A69' }] // 31337 in hex
+                        });
+                        console.log("Switched to Hardhat network");
+                    } catch (switchError) {
+                        console.error("Failed to switch network:", switchError);
+                        
+                        // If the error code is 4902, the chain hasn't been added
+                        if (switchError.code === 4902) {
+                            try {
+                                await window.ethereum.request({
+                                    method: 'wallet_addEthereumChain',
+                                    params: [{
+                                        chainId: '0x7A69',
+                                        chainName: 'Hardhat Network',
+                                        nativeCurrency: { name: 'ETH', symbol: 'ETH', decimals: 18 },
+                                        rpcUrls: ['http://127.0.0.1:8545/'],
+                                    }]
+                                });
+                                console.log("Hardhat network added");
+                                
+                                // Try to switch again after adding
+                                await window.ethereum.request({
+                                    method: 'wallet_switchEthereumChain',
+                                    params: [{ chainId: '0x7A69' }]
+                                });
+                            } catch (addError) {
+                                console.error("Failed to add network:", addError);
+                                alert("Failed to add Hardhat Network. Please add it manually with these settings:\n- Network Name: Hardhat Network\n- RPC URL: http://127.0.0.1:8545/\n- Chain ID: 31337\n- Currency Symbol: ETH");
+                            }
+                        } else if (switchError.code !== 4001) {
+                            // If user didn't reject, show a manual instruction
+                            alert("Please manually switch to the Hardhat network in your MetaMask");
+                        }
+                    }
+                    
+                    // Check again if we're on the right network after attempting to switch
+                    if (!(await checkNetwork())) {
+                        document.getElementById('connect-wallet').textContent = "Connect Wallet";
+                        document.getElementById('connect-wallet').disabled = false;
+                        return; // Exit if still not on the right network
+                    }
+                }
+                
+                console.log("Creating fresh provider...");
+                // Create a completely fresh provider to avoid stale state
+                provider = await getFreshProvider();
+                
+                console.log("Reconnecting contracts...");
+                // Reconnect contracts with the fresh provider
+                idoPoolContract = new ethers.Contract(idoPoolAddress, idoPoolABI, provider);
+                idoTokenContract = new ethers.Contract(idoTokenAddress, erc20ABI, provider);
+                paymentTokenContract = new ethers.Contract(paymentTokenAddress, erc20ABI, provider);
+                
+                // Now handle the account change
+                await handleAccountsChanged(accounts);
+                
+                console.log("Wallet connected successfully");
+                document.getElementById('connect-wallet').textContent = "Connect Wallet";
+                document.getElementById('connect-wallet').disabled = false;
+            } catch (error) {
+                console.error("Connection error:", error);
+                alert("Error connecting wallet: " + (error.message || error));
+                document.getElementById('connect-wallet').textContent = "Connect Wallet";
+                document.getElementById('connect-wallet').disabled = false;
+            }
+        }
+          // Handle account changes
+        async function handleAccountsChanged(accounts) {
+            if (accounts.length === 0) {
+                document.getElementById('connection-status').textContent = 'Not connected';
+                document.getElementById('connection-status').className = 'fw-bold text-danger';
+                document.getElementById('wallet-address').textContent = '-';
+                return;
+            }
+            
+            // Update connection status
+            userAddress = accounts[0];
+            document.getElementById('connection-status').textContent = 'Connected';
+            document.getElementById('connection-status').className = 'fw-bold text-success';
+            document.getElementById('wallet-address').textContent = userAddress;
+              // Update signer
+            signer = provider.getSigner();
+              // Check if user is owner
+            try {
+                const owner = await smartContractCall(idoPoolContract.owner.bind(idoPoolContract));
+                isOwner = (owner.toLowerCase() === userAddress.toLowerCase());
+                
+                // Display/hide admin actions based on owner status
+                document.getElementById('admin-actions').style.display = isOwner ? 'block' : 'none';
+                
+                // Refresh information
+                await refreshIDOInfo();
+                await refreshUserInfo();
+            } catch (error) {
+                console.error("Error checking owner:", error);
+            }
+        }
+          // Refresh IDO information
+        async function refreshIDOInfo() {            try {
+                // We no longer need explicit override options here
+                // our smartContractCall function will handle this
+                  const idoInfo = await smartContractCall(idoPoolContract.getIDOInfo.bind(idoPoolContract));
+                const tokenPrice = await smartContractCall(idoPoolContract.tokenPrice.bind(idoPoolContract));
+                
+                // Format values
+                document.getElementById('soft-cap').textContent = formatEther(idoInfo[2]);
+                document.getElementById('hard-cap').textContent = formatEther(idoInfo[3]);
+                document.getElementById('total-raised').textContent = formatEther(idoInfo[4]);
+                document.getElementById('token-price').textContent = formatEther(tokenPrice) + " PAY";
+                document.getElementById('tokens-claimable').textContent = idoInfo[5] ? 'Yes' : 'No';
+                document.getElementById('refunds-enabled').textContent = idoInfo[6] ? 'Yes' : 'No';
+                
+                // Determine IDO status
+                let status = "Not Started";
+                if (idoInfo[0].toString() !== '0') {
+                    const now = Math.floor(Date.now() / 1000);
+                    if (now < idoInfo[0].toNumber()) {
+                        status = "Scheduled";
+                    } else if (now >= idoInfo[0].toNumber() && now <= idoInfo[1].toNumber()) {
+                        status = "Active";
+                    } else {
+                        status = "Ended";
+                    }
+                }
+                document.getElementById('ido-status').textContent = status;
+                
+                // Format times
+                if (idoInfo[0].toString() !== '0') {
+                    document.getElementById('start-time').textContent = formatDate(idoInfo[0].toNumber());
+                    document.getElementById('end-time').textContent = formatDate(idoInfo[1].toNumber());
+                } else {
+                    document.getElementById('start-time').textContent = '-';
+                    document.getElementById('end-time').textContent = '-';
+                }
+            } catch (error) {
+                console.error("Error refreshing IDO info:", error);
+            }
+        }
+          // Refresh user information
+        async function refreshUserInfo() {            try {
+                if (!userAddress) return;
+                
+                // We no longer need explicit override options here
+                // our smartContractCall function will handle this
+                  const userInfo = await smartContractCall(idoPoolContract.getUserInfo.bind(idoPoolContract), userAddress);
+                document.getElementById('user-contribution').textContent = formatEther(userInfo[0]);
+                
+                // Update payment token balance
+                const paymentBalance = await smartContractCall(paymentTokenContract.balanceOf.bind(paymentTokenContract), userAddress);
+                document.getElementById('buy-amount').placeholder = `Amount (max: ${formatEther(paymentBalance)})`;
+            } catch (error) {
+                console.error("Error refreshing user info:", error);
+            }
+        }
+        
+        // Approve tokens for spending
+        async function approveTokens() {
+            try {
+                const amount = document.getElementById('buy-amount').value;
+                if (!amount || parseFloat(amount) <= 0) {
+                    alert('Please enter a valid amount');
+                    return;
+                }
+                
+                const amountWei = ethers.utils.parseEther(amount);
+                const paymentTokenWithSigner = paymentTokenContract.connect(signer);
+                
+                const tx = await paymentTokenWithSigner.approve(idoPoolAddress, amountWei);
+                await tx.wait();
+                
+                alert('Tokens approved for spending');
+            } catch (error) {
+                console.error("Error approving tokens:", error);
+                alert("Error approving tokens");
+            }
+        }
+        
+        // Buy tokens
+        async function buyTokens() {
+            try {
+                const amount = document.getElementById('buy-amount').value;
+                if (!amount || parseFloat(amount) <= 0) {
+                    alert('Please enter a valid amount');
+                    return;
+                }
+                
+                const amountWei = ethers.utils.parseEther(amount);
+                  // Check allowance
+                const allowance = await smartContractCall(paymentTokenContract.allowance.bind(paymentTokenContract), userAddress, idoPoolAddress);
+                if (allowance.lt(amountWei)) {
+                    alert('Please approve tokens first');
+                    return;
+                }
+                
+                const idoPoolWithSigner = idoPoolContract.connect(signer);
+                const tx = await idoPoolWithSigner.buyTokens(amountWei);
+                await tx.wait();
+                
+                alert('Tokens purchased successfully');
+                await refreshIDOInfo();
+                await refreshUserInfo();
+            } catch (error) {
+                console.error("Error buying tokens:", error);
+                alert("Error buying tokens: " + (error.message || error));
+            }
+        }
+        
+        // Claim tokens
+        async function claimTokens() {
+            try {
+                const idoPoolWithSigner = idoPoolContract.connect(signer);
+                const tx = await idoPoolWithSigner.claimTokens();
+                await tx.wait();
+                
+                alert('Tokens claimed successfully');
+                await refreshUserInfo();
+            } catch (error) {
+                console.error("Error claiming tokens:", error);
+                alert("Error claiming tokens: " + (error.message || error));
+            }
+        }
+        
+        // Claim refund
+        async function claimRefund() {
+            try {
+                const idoPoolWithSigner = idoPoolContract.connect(signer);
+                const tx = await idoPoolWithSigner.claimRefund();
+                await tx.wait();
+                
+                alert('Refund claimed successfully');
+                await refreshUserInfo();
+            } catch (error) {
+                console.error("Error claiming refund:", error);
+                alert("Error claiming refund: " + (error.message || error));
+            }
+        }
+        
+        // Start IDO
+        async function startIDO() {
+            try {
+                if (!isOwner) {
+                    alert('Only the owner can perform this action');
+                    return;
+                }
+                  const startTimeOffset = parseInt(document.getElementById('start-time-input').value);
+                const duration = parseInt(document.getElementById('end-time-input').value);
+                
+                const now = Math.floor(Date.now() / 1000);
+                const startTime = now + startTimeOffset;
+                const endTime = startTime + duration;
+                
+                const idoPoolWithSigner = idoPoolContract.connect(signer);
+                const tx = await idoPoolWithSigner.startIDO(startTime, endTime);
+                await tx.wait();
+                
+                alert('IDO started successfully');
+                await refreshIDOInfo();
+            } catch (error) {
+                console.error("Error starting IDO:", error);
+                alert("Error starting IDO: " + (error.message || error));
+            }
+        }
+        
+        // End IDO
+        async function endIDO() {
+            try {
+                if (!isOwner) {
+                    alert('Only the owner can perform this action');
+                    return;
+                }
+                
+                const idoPoolWithSigner = idoPoolContract.connect(signer);
+                const tx = await idoPoolWithSigner.endIDO();
+                await tx.wait();
+                
+                alert('IDO ended successfully');
+                await refreshIDOInfo();
+            } catch (error) {
+                console.error("Error ending IDO:", error);
+                alert("Error ending IDO: " + (error.message || error));
+            }
+        }
+        
+        // Enable token claims
+        async function enableTokenClaims() {
+            try {
+                if (!isOwner) {
+                    alert('Only the owner can perform this action');
+                    return;
+                }
+                
+                const idoPoolWithSigner = idoPoolContract.connect(signer);
+                const tx = await idoPoolWithSigner.enableTokenClaims();
+                await tx.wait();
+                
+                alert('Token claims enabled successfully');
+                await refreshIDOInfo();
+            } catch (error) {
+                console.error("Error enabling token claims:", error);
+                alert("Error enabling token claims: " + (error.message || error));
+            }
+        }
+        
+        // Enable refunds
+        async function enableRefunds() {
+            try {
+                if (!isOwner) {
+                    alert('Only the owner can perform this action');
+                    return;
+                }
+                
+                // Set refund window to 1 hour from now
+                const now = Math.floor(Date.now() / 1000);
+                const refundEndTime = now + 3600;
+                
+                const idoPoolWithSigner = idoPoolContract.connect(signer);
+                const tx1 = await idoPoolWithSigner.setRefundWindow(refundEndTime);
+                await tx1.wait();
+                
+                const tx2 = await idoPoolWithSigner.setRefundsEnabled(true);
+                await tx2.wait();
+                
+                alert('Refunds enabled successfully');
+                await refreshIDOInfo();
+            } catch (error) {
+                console.error("Error enabling refunds:", error);
+                alert("Error enabling refunds: " + (error.message || error));
+            }
+        }
+        
+        // Enable global refund
+        async function enableGlobalRefund() {
+            try {
+                if (!isOwner) {
+                    alert('Only the owner can perform this action');
+                    return;
+                }
+                
+                const idoPoolWithSigner = idoPoolContract.connect(signer);
+                const tx = await idoPoolWithSigner.enableGlobalRefund();
+                await tx.wait();
+                
+                alert('Global refund enabled successfully');
+                await refreshIDOInfo();
+            } catch (error) {
+                console.error("Error enabling global refund:", error);
+                alert("Error enabling global refund: " + (error.message || error));
+            }
+        }
+        
+        // Withdraw collected payments
+        async function withdrawFunds() {
+            try {
+                if (!isOwner) {
+                    alert('Only the owner can perform this action');
+                    return;
+                }
+                
+                const idoPoolWithSigner = idoPoolContract.connect(signer);
+                const tx = await idoPoolWithSigner.withdrawCollectedPayments();
+                await tx.wait();
+                
+                alert('Funds withdrawn successfully');
+                await refreshIDOInfo();
+            } catch (error) {
+                console.error("Error withdrawing funds:", error);
+                alert("Error withdrawing funds: " + (error.message || error));
+            }
+        }
+        
+        // Withdraw unsold tokens
+        async function withdrawTokens() {
+            try {
+                if (!isOwner) {
+                    alert('Only the owner can perform this action');
+                    return;
+                }
+                
+                const idoPoolWithSigner = idoPoolContract.connect(signer);
+                const tx = await idoPoolWithSigner.withdrawUnsoldTokens();
+                await tx.wait();
+                
+                alert('Unsold tokens withdrawn successfully');
+                await refreshIDOInfo();
+            } catch (error) {
+                console.error("Error withdrawing tokens:", error);
+                alert("Error withdrawing tokens: " + (error.message || error));
+            }
+        }
+        
+        // Initialize the application when page loads
+        window.addEventListener('DOMContentLoaded', init);
+        
+        // Handle account changes
+        if (window.ethereum) {
+            window.ethereum.on('accountsChanged', handleAccountsChanged);
+        }
+    </script>
+</body>
+</html>
